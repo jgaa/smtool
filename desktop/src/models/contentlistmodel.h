@@ -19,6 +19,7 @@ public:
         BurstTemplateKeyRole,
         TitleRole,
         DescriptionRole,
+        DescriptionPreviewRole,
         PillarRole,
         SeriesRole,
         KindRole,
@@ -37,10 +38,14 @@ public:
     [[nodiscard]] QVariant data(const QModelIndex &index, int role) const override;
     [[nodiscard]] QHash<int, QByteArray> roleNames() const override;
 
+    void setDescriptionPreviewWordCap(int value);
     void setItems(std::vector<Domain::ContentSummary> items);
 
 private:
+    [[nodiscard]] QString descriptionPreview(const QString &text) const;
+
     std::vector<Domain::ContentSummary> items_;
+    int descriptionPreviewWordCap_ = 10;
 };
 
 } // namespace SmTool::Models

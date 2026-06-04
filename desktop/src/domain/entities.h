@@ -73,6 +73,19 @@ struct ContentSummary {
     QDateTime publishedAt;
 };
 
+struct Publication {
+    QString id;
+    QString contentId;
+    QString channelId;
+    QString channelName;
+    QString status;
+    QDateTime scheduledAt;
+    QDateTime publishedAt;
+    QString url;
+    QDateTime createdAt;
+    QDateTime updatedAt;
+};
+
 struct SeriesSummary {
     QString id;
     QString name;
@@ -90,7 +103,10 @@ struct CalendarEntry {
     QString seriesName;
     QString channelName;
     QString sourceType;
+    QString contentStatus;
+    QString publicationStatus;
     QDateTime scheduledAt;
+    bool isOverdue = false;
 };
 
 struct DashboardMetric {

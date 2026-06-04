@@ -1,4 +1,7 @@
 #include "app/appcontroller.h"
+#include "app/appinfo.h"
+#include "app/appsettings.h"
+#include "app/loggingcontroller.h"
 
 #include <QCommandLineOption>
 #include <QCommandLineParser>
@@ -11,7 +14,13 @@ int main(int argc, char *argv[])
 {
     QGuiApplication app(argc, argv);
     QCoreApplication::setApplicationName(QStringLiteral("SmTool"));
+    QCoreApplication::setApplicationVersion(QStringLiteral(SMTOOL_VERSION));
     QCoreApplication::setOrganizationName(QStringLiteral("smtool"));
+
+    SmTool::App::AppInfo appInfo;
+    SmTool::App::AppSettings appSettings;
+    SmTool::App::LoggingController loggingController;
+    loggingController.initialize();
 
     QCommandLineParser parser;
     parser.setApplicationDescription(QStringLiteral("Local-first content strategy POC"));
@@ -30,28 +39,47 @@ int main(int argc, char *argv[])
     parser.addOption(databasePathOption);
     parser.process(app);
 
+    const auto commandLineDatabasePath = parser.value(databasePathOption).trimmed();
+    const auto effectiveDatabasePath = appSettings.effectiveDatabasePath(commandLineDatabasePath);
+    if (commandLineDatabasePath.isEmpty() && effectiveDatabasePath != appSettings.defaultDatabasePath()) {
+        QString startupMoveError;
+        if (!SmTool::Data::Database::moveDatabaseFile(appSettings.defaultDatabasePath(), effectiveDatabasePath, &startupMoveError)) {
+            LOG_ERROR << "Failed to move database during startup: " << startupMoveError.toStdString();
+        }
+    }
+
     SmTool::Data::Database::Options databaseOptions;
     databaseOptions.seedDemoData = parser.isSet(seedDemoDataOption);
-    databaseOptions.databaseFilePath = parser.value(databasePathOption);
+    databaseOptions.databaseFilePath = effectiveDatabasePath;
 
     SmTool::App::AppController controller{databaseOptions};
     QString errorMessage;
     if (!controller.initialize(&errorMessage)) {
-        qCritical().noquote() << "Failed to initialize SmTool:" << errorMessage;
+        LOG_ERROR << "Failed to initialize SmTool: " << errorMessage.toStdString();
         return 1;
     }
+    controller.setDescriptionPreviewWordCap(appSettings.boardDescriptionPreviewWordCap());
+    QObject::connect(&appSettings, &SmTool::App::AppSettings::boardDescriptionPreviewWordCapChanged,
+                     &controller, [&appSettings, &controller]() {
+        controller.setDescriptionPreviewWordCap(appSettings.boardDescriptionPreviewWordCap());
+    });
+
+    LOG_INFO << "Starting SmTool";
+    LOG_INFO << "Configuration from '" << loggingController.settingsFilePath().toStdString() << "'";
 
     QQmlApplicationEngine engine;
     QObject::connect(&engine, &QQmlApplicationEngine::warnings, [](const QList<QQmlError> &warnings) {
         for (const auto &warning : warnings) {
-            qCritical().noquote() << warning.toString();
+            LOG_ERROR << "QML: " << warning.toString().toStdString();
         }
     });
     engine.rootContext()->setContextProperty(QStringLiteral("appController"), &controller);
+    engine.rootContext()->setContextProperty(QStringLiteral("appInfo"), &appInfo);
+    engine.rootContext()->setContextProperty(QStringLiteral("appSettings"), &appSettings);
     engine.load(QUrl(QStringLiteral("qrc:/qt/qml/SmTool/src/ui/qml/Main.qml")));
 
     if (engine.rootObjects().isEmpty()) {
-        qCritical().noquote() << "Failed to create a QML root object.";
+        LOG_ERROR << "Failed to create a QML root object.";
         return 1;
     }
 

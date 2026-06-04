@@ -18,11 +18,16 @@ public:
     explicit Database(Options options);
     ~Database();
 
+    static QString defaultDatabasePath();
+    static bool moveDatabaseFile(const QString &sourcePath, const QString &targetPath, QString *errorMessage = nullptr);
+
     bool initialize(QString *errorMessage = nullptr);
+    bool reopenAtPath(const QString &path, QString *errorMessage = nullptr);
     [[nodiscard]] QSqlDatabase connection() const;
     [[nodiscard]] QString databasePath() const;
 
 private:
+    void close();
     bool open(QString *errorMessage);
     bool enableForeignKeys(QString *errorMessage);
     bool ensureMigrationTable(QString *errorMessage);

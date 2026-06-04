@@ -1,5 +1,6 @@
 #include "data/dashboardrepository.h"
 
+#include <QDate>
 #include <QSqlQuery>
 
 using namespace Qt::Literals::StringLiterals;
@@ -11,29 +12,42 @@ DashboardRepository::DashboardRepository(QSqlDatabase database)
 {
 }
 
-std::vector<Domain::CalendarEntry> DashboardRepository::calendarEntries() const
+std::vector<Domain::CalendarEntry> DashboardRepository::calendarEntries(bool includeArchived, bool includePublished) const
 {
     QSqlQuery query{database_};
     query.prepare(QStringLiteral(
         "SELECT pub.id, c.id, c.title, COALESCE(s.name, ''), COALESCE(ch.display_name, ''), 'publication', "
-        "COALESCE(pub.scheduled_at, c.scheduled_at) "
+        "c.status, pub.status, COALESCE(pub.scheduled_at, c.scheduled_at) "
         "FROM publication pub "
         "JOIN content c ON c.id = pub.content_id "
         "LEFT JOIN series s ON s.id = c.series_id "
         "JOIN channel ch ON ch.id = pub.channel_id "
         "WHERE COALESCE(pub.scheduled_at, c.scheduled_at) IS NOT NULL "
+        "  AND (:include_archived = 1 OR c.status != 'archived') "
+        "  AND (:include_published = 1 OR (COALESCE(pub.status, '') != 'published' AND pub.published_at IS NULL)) "
         "UNION ALL "
-        "SELECT c.id, c.id, c.title, COALESCE(s.name, ''), COALESCE(ch.display_name, ''), 'content', c.scheduled_at "
+        "SELECT c.id, c.id, c.title, COALESCE(s.name, ''), COALESCE(ch.display_name, ''), 'content', c.status, '', c.scheduled_at "
         "FROM content c "
         "LEFT JOIN series s ON s.id = c.series_id "
         "LEFT JOIN channel ch ON ch.id = c.suggested_channel_id "
         "WHERE c.scheduled_at IS NOT NULL "
+        "  AND (:include_archived = 1 OR c.status != 'archived') "
+        "  AND (:include_published = 1 OR c.status != 'published') "
         "  AND NOT EXISTS (SELECT 1 FROM publication pub WHERE pub.content_id = c.id) "
-        "ORDER BY 7 ASC, 3 ASC"));
+        "ORDER BY 9 ASC, 3 ASC"));
+    query.bindValue(":include_archived"_L1, includeArchived ? 1 : 0);
+    query.bindValue(":include_published"_L1, includePublished ? 1 : 0);
     query.exec();
 
     std::vector<Domain::CalendarEntry> entries;
+    const auto today = QDate::currentDate();
     while (query.next()) {
+        const auto contentStatus = query.value(6).toString();
+        const auto publicationStatus = query.value(7).toString();
+        const auto scheduledAt = query.value(8).toDateTime();
+        const bool isPublicationEntry = query.value(5).toString() == "publication"_L1;
+        const bool isComplete = contentStatus == "archived"_L1
+            || (isPublicationEntry ? publicationStatus == "published"_L1 : contentStatus == "published"_L1);
         entries.push_back({
             .id = query.value(0).toString(),
             .contentId = query.value(1).toString(),
@@ -41,7 +55,10 @@ std::vector<Domain::CalendarEntry> DashboardRepository::calendarEntries() const
             .seriesName = query.value(3).toString(),
             .channelName = query.value(4).toString(),
             .sourceType = query.value(5).toString(),
-            .scheduledAt = query.value(6).toDateTime(),
+            .contentStatus = contentStatus,
+            .publicationStatus = publicationStatus,
+            .scheduledAt = scheduledAt,
+            .isOverdue = scheduledAt.isValid() && scheduledAt.date() < today && !isComplete,
         });
     }
     return entries;

@@ -6,6 +6,20 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+include(FetchContent)
+
+set(SMTOOL_LOGFAULT_SOURCE_DIR "/home/jgaa/src/logfault" CACHE PATH "Use a local source dir for logfault")
+if(SMTOOL_LOGFAULT_SOURCE_DIR AND EXISTS "${SMTOOL_LOGFAULT_SOURCE_DIR}/CMakeLists.txt")
+    message(STATUS "SmTool: using local logfault from ${SMTOOL_LOGFAULT_SOURCE_DIR}")
+    FetchContent_Declare(logfault SOURCE_DIR "${SMTOOL_LOGFAULT_SOURCE_DIR}")
+else()
+    FetchContent_Declare(logfault
+        GIT_REPOSITORY https://github.com/jgaa/logfault.git
+        GIT_TAG v0.8.5
+    )
+endif()
+FetchContent_MakeAvailable(logfault)
+
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Quick Qml QuickControls2 Sql Test)
 
 qt_standard_project_setup(REQUIRES 6.5)
@@ -13,10 +27,14 @@ qt_standard_project_setup(REQUIRES 6.5)
 set(SMTOOL_SOURCES
     src/main.cpp
     src/app/appcontroller.cpp
+    src/app/appinfo.cpp
+    src/app/appsettings.cpp
+    src/app/loggingcontroller.cpp
     src/data/contentrepository.cpp
     src/data/dashboardrepository.cpp
     src/data/database.cpp
     src/data/lookupsrepository.cpp
+    src/data/publicationrepository.cpp
     src/data/seriesrepository.cpp
     src/models/calendarentrymodel.cpp
     src/models/contentlistmodel.cpp
@@ -27,10 +45,14 @@ set(SMTOOL_SOURCES
 
 set(SMTOOL_HEADERS
     src/app/appcontroller.h
+    src/app/appinfo.h
+    src/app/appsettings.h
+    src/app/loggingcontroller.h
     src/data/contentrepository.h
     src/data/dashboardrepository.h
     src/data/database.h
     src/data/lookupsrepository.h
+    src/data/publicationrepository.h
     src/data/seriesrepository.h
     src/domain/constants.h
     src/domain/entities.h
@@ -55,8 +77,14 @@ qt_add_qml_module(SmToolApp
     URI SmTool
     VERSION 1.0
     QML_FILES
+        src/ui/qml/AboutDialog.qml
         src/ui/qml/Main.qml
+        src/ui/qml/LogSettings.qml
+        src/ui/qml/SettingsDialog.qml
+        src/ui/qml/SystemSettings.qml
         src/ui/qml/components/BoardColumn.qml
+        src/ui/qml/components/ContentSummaryCard.qml
+        src/ui/qml/components/DateSelector.qml
         src/ui/qml/components/SectionCard.qml
 )
 
@@ -67,6 +95,7 @@ qt_add_resources(SmToolApp smtool_resources
 )
 
 target_include_directories(SmToolApp PRIVATE src)
+target_compile_definitions(SmToolApp PRIVATE SMTOOL_VERSION="${PROJECT_VERSION}")
 
 target_link_libraries(SmToolApp
     PRIVATE
@@ -76,25 +105,32 @@ target_link_libraries(SmToolApp
         Qt6::Qml
         Qt6::QuickControls2
         Qt6::Sql
+        logfault::logfault
 )
 
 enable_testing()
 
 qt_add_executable(SmToolTests
     tests/test_database.cpp
+    src/app/appcontroller.cpp
+    src/app/appinfo.cpp
     src/data/contentrepository.cpp
     src/data/dashboardrepository.cpp
     src/data/database.cpp
     src/data/lookupsrepository.cpp
+    src/data/publicationrepository.cpp
     src/data/seriesrepository.cpp
     src/models/calendarentrymodel.cpp
     src/models/contentlistmodel.cpp
     src/models/dashboardmetricmodel.cpp
     src/models/lookuplistmodel.cpp
     src/models/serieslistmodel.cpp
+    src/app/appsettings.cpp
+    src/app/loggingcontroller.cpp
 )
 
 target_include_directories(SmToolTests PRIVATE src)
+target_compile_definitions(SmToolTests PRIVATE SMTOOL_VERSION="${PROJECT_VERSION}")
 
 qt_add_resources(SmToolTests smtool_test_resources
     PREFIX /
@@ -105,8 +141,10 @@ qt_add_resources(SmToolTests smtool_test_resources
 target_link_libraries(SmToolTests
     PRIVATE
         Qt6::Core
+        Qt6::Gui
         Qt6::Sql
         Qt6::Test
+        logfault::logfault
 )
 
 add_test(NAME SmToolTests COMMAND SmToolTests)

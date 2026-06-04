@@ -4,6 +4,7 @@
 #include "data/dashboardrepository.h"
 #include "data/database.h"
 #include "data/lookupsrepository.h"
+#include "data/publicationrepository.h"
 #include "data/seriesrepository.h"
 #include "models/calendarentrymodel.h"
 #include "models/contentlistmodel.h"
@@ -12,6 +13,7 @@
 #include "models/serieslistmodel.h"
 
 #include <QObject>
+#include <QVariantMap>
 
 namespace SmTool::App {
 
@@ -44,6 +46,9 @@ class AppController : public QObject
     Q_PROPERTY(SmTool::Models::DashboardMetricModel *dashboardZeroPublishedPillarsModel READ dashboardZeroPublishedPillarsModel CONSTANT)
     Q_PROPERTY(bool boardShowArchived READ boardShowArchived WRITE setBoardShowArchived NOTIFY boardShowArchivedChanged)
     Q_PROPERTY(bool dashboardIncludeArchived READ dashboardIncludeArchived WRITE setDashboardIncludeArchived NOTIFY dashboardIncludeArchivedChanged)
+    Q_PROPERTY(bool calendarIncludeArchived READ calendarIncludeArchived WRITE setCalendarIncludeArchived NOTIFY calendarIncludeArchivedChanged)
+    Q_PROPERTY(bool calendarIncludePublished READ calendarIncludePublished WRITE setCalendarIncludePublished NOTIFY calendarIncludePublishedChanged)
+    Q_PROPERTY(bool clipboardHasText READ clipboardHasText NOTIFY clipboardHasTextChanged)
     Q_PROPERTY(QString currentSourceId READ currentSourceId WRITE setCurrentSourceId NOTIFY currentSourceIdChanged)
     Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY statusMessageChanged)
 
@@ -51,6 +56,7 @@ public:
     explicit AppController(Data::Database::Options databaseOptions = {}, QObject *parent = nullptr);
 
     bool initialize(QString *errorMessage = nullptr);
+    void setDescriptionPreviewWordCap(int value);
 
     [[nodiscard]] Models::ContentListModel *inboxModel();
     [[nodiscard]] Models::ContentListModel *boardInboxModel();
@@ -83,29 +89,67 @@ public:
     [[nodiscard]] bool dashboardIncludeArchived() const;
     void setDashboardIncludeArchived(bool enabled);
 
+    [[nodiscard]] bool calendarIncludeArchived() const;
+    void setCalendarIncludeArchived(bool enabled);
+
+    [[nodiscard]] bool calendarIncludePublished() const;
+    void setCalendarIncludePublished(bool enabled);
+
+    [[nodiscard]] bool clipboardHasText() const;
+
     [[nodiscard]] QString currentSourceId() const;
     void setCurrentSourceId(const QString &id);
 
     [[nodiscard]] QString statusMessage() const;
 
     Q_INVOKABLE bool refreshAll();
+    Q_INVOKABLE bool applyDatabasePath(const QString &path);
+    Q_INVOKABLE void copyTextToClipboard(const QString &text) const;
+    Q_INVOKABLE bool pasteClipboardToIdea();
+    Q_INVOKABLE bool createIdeaFromText(const QString &text);
+    Q_INVOKABLE QVariantMap contentDetails(const QString &contentId) const;
+    Q_INVOKABLE QVariantMap publicationDetails(const QString &publicationId) const;
+    Q_INVOKABLE bool updateContent(const QString &contentId,
+                                   const QString &title,
+                                   const QString &description,
+                                   const QString &pillarId,
+                                   int priority,
+                                   const QString &scheduledAt,
+                                   const QString &suggestedChannelId,
+                                   const QString &status);
+    Q_INVOKABLE bool savePublication(const QString &contentId,
+                                     const QString &publicationId,
+                                     const QString &channelId,
+                                     const QString &status,
+                                     const QString &scheduledAt,
+                                     const QString &publishedAt,
+                                     const QString &url);
+    Q_INVOKABLE bool deletePublication(const QString &publicationId);
+    Q_INVOKABLE bool deleteContent(const QString &contentId);
     Q_INVOKABLE bool createInboxItem(const QString &title,
                                      const QString &description,
                                      const QString &pillarId,
                                      const QString &seriesId,
                                      int priority,
+                                     const QString &scheduledAt,
                                      const QString &suggestedChannelId);
     Q_INVOKABLE bool moveContentToStatus(const QString &contentId, const QString &targetStatus);
     Q_INVOKABLE bool createSeries(const QString &name, const QString &description, const QString &pillarId);
-    Q_INVOKABLE bool createBurstForCurrentSource();
+    Q_INVOKABLE QVariantList burstTemplateOptions() const;
+    Q_INVOKABLE bool createBurstForCurrentSource(const QVariantList &templateKeys);
 
 signals:
     void boardShowArchivedChanged();
     void dashboardIncludeArchivedChanged();
+    void calendarIncludeArchivedChanged();
+    void calendarIncludePublishedChanged();
+    void clipboardHasTextChanged();
     void currentSourceIdChanged();
     void statusMessageChanged();
 
 private:
+    void initializeRepositories();
+    void resetRepositories();
     void loadLookupModels();
     void refreshInbox();
     void refreshBoard();
@@ -114,10 +158,12 @@ private:
     void refreshDerivatives();
     void refreshSeries();
     void refreshDashboard();
+    void refreshClipboardHasText();
     void setStatusMessage(const QString &message);
 
     Data::Database database_;
     std::unique_ptr<Data::LookupsRepository> lookupsRepository_;
+    std::unique_ptr<Data::PublicationRepository> publicationRepository_;
     std::unique_ptr<Data::SeriesRepository> seriesRepository_;
     std::unique_ptr<Data::ContentRepository> contentRepository_;
     std::unique_ptr<Data::DashboardRepository> dashboardRepository_;
@@ -149,6 +195,9 @@ private:
 
     bool boardShowArchived_ = false;
     bool dashboardIncludeArchived_ = false;
+    bool calendarIncludeArchived_ = false;
+    bool calendarIncludePublished_ = false;
+    bool clipboardHasText_ = false;
     QString currentSourceId_;
     QString statusMessage_;
 };

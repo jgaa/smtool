@@ -1,5 +1,6 @@
 #include "data/database.h"
 
+#include "app/loggingcontroller.h"
 #include "domain/constants.h"
 
 #include <QCoreApplication>
@@ -110,19 +111,83 @@ Database::Database(Options options)
 
 Database::~Database()
 {
-    if (!connectionName_.isEmpty()) {
-        QSqlDatabase::removeDatabase(connectionName_);
+    close();
+}
+
+QString Database::defaultDatabasePath()
+{
+    auto baseLocation = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    if (baseLocation.isEmpty()) {
+        baseLocation = QDir::home().filePath(QStringLiteral(".local/share/SmTool"));
     }
+    return QDir{baseLocation}.filePath(QStringLiteral("smtool.sqlite"));
+}
+
+bool Database::moveDatabaseFile(const QString &sourcePath, const QString &targetPath, QString *errorMessage)
+{
+    const QFileInfo sourceInfo{sourcePath};
+    const QFileInfo targetInfo{targetPath};
+    if (sourceInfo.absoluteFilePath() == targetInfo.absoluteFilePath()) {
+        return true;
+    }
+    if (!sourceInfo.exists()) {
+        return true;
+    }
+    if (targetInfo.exists()) {
+        return true;
+    }
+
+    QDir{}.mkpath(targetInfo.absolutePath());
+
+    if (QFile::rename(sourceInfo.absoluteFilePath(), targetInfo.absoluteFilePath())) {
+        return true;
+    }
+
+    if (QFile::copy(sourceInfo.absoluteFilePath(), targetInfo.absoluteFilePath())) {
+        QFile::remove(sourceInfo.absoluteFilePath());
+        return true;
+    }
+
+    if (errorMessage != nullptr) {
+        *errorMessage = QStringLiteral("Unable to move database from %1 to %2.")
+                            .arg(sourceInfo.absoluteFilePath(), targetInfo.absoluteFilePath());
+    }
+    return false;
 }
 
 bool Database::initialize(QString *errorMessage)
 {
+    close();
     return open(errorMessage)
         && enableForeignKeys(errorMessage)
         && ensureMigrationTable(errorMessage)
         && applyMigrations(errorMessage)
         && seedDefaults(errorMessage)
         && (!options_.seedDemoData || seedDemoData(errorMessage));
+}
+
+bool Database::reopenAtPath(const QString &path, QString *errorMessage)
+{
+    const auto targetPath = path.trimmed().isEmpty() ? defaultDatabasePath() : QDir::cleanPath(path.trimmed());
+    const auto currentPath = databasePath();
+    if (QFileInfo{currentPath}.absoluteFilePath() == QFileInfo{targetPath}.absoluteFilePath()) {
+        return true;
+    }
+
+    close();
+    if (!moveDatabaseFile(currentPath, targetPath, errorMessage)) {
+        options_.databaseFilePath = currentPath;
+        initialize(errorMessage);
+        return false;
+    }
+
+    options_.databaseFilePath = targetPath;
+    if (initialize(errorMessage)) {
+        LOG_INFO << "Database reopened at '" << targetPath.toStdString() << "'";
+        return true;
+    }
+
+    return false;
 }
 
 QSqlDatabase Database::connection() const
@@ -136,11 +201,23 @@ QString Database::databasePath() const
         return options_.databaseFilePath;
     }
 
-    auto baseLocation = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    if (baseLocation.isEmpty()) {
-        baseLocation = QDir::home().filePath(QStringLiteral(".local/share/SmTool"));
+    return defaultDatabasePath();
+}
+
+void Database::close()
+{
+    if (connectionName_.isEmpty()) {
+        return;
     }
-    return QDir{baseLocation}.filePath(QStringLiteral("smtool.sqlite"));
+
+    {
+        auto db = QSqlDatabase::database(connectionName_, false);
+        if (db.isValid()) {
+            db.close();
+        }
+    }
+    QSqlDatabase::removeDatabase(connectionName_);
+    connectionName_.clear();
 }
 
 bool Database::open(QString *errorMessage)
@@ -153,6 +230,7 @@ bool Database::open(QString *errorMessage)
     db.setDatabaseName(info.absoluteFilePath());
 
     if (db.open()) {
+        LOG_INFO << "Opened database '" << info.absoluteFilePath().toStdString() << "'";
         return true;
     }
 

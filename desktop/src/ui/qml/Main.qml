@@ -13,37 +13,840 @@ ApplicationWindow {
     title: "SmTool"
 
     property var boardColumns: [
-        { title: "Inbox", model: appController.boardInboxModel },
-        { title: "Clarifying", model: appController.boardClarifyingModel },
-        { title: "Shaping", model: appController.boardShapingModel },
-        { title: "Drafting", model: appController.boardDraftingModel },
-        { title: "Ready", model: appController.boardReadyModel },
-        { title: "Scheduled", model: appController.boardScheduledModel },
-        { title: "Published", model: appController.boardPublishedModel },
-        { title: "Reviewing", model: appController.boardReviewingModel }
+        { title: "Inbox", status: "inbox", model: appController.boardInboxModel },
+        { title: "Clarifying", status: "clarifying", model: appController.boardClarifyingModel },
+        { title: "Shaping", status: "shaping", model: appController.boardShapingModel },
+        { title: "Drafting", status: "drafting", model: appController.boardDraftingModel },
+        { title: "Ready", status: "ready", model: appController.boardReadyModel },
+        { title: "Scheduled", status: "scheduled", model: appController.boardScheduledModel },
+        { title: "Published", status: "published", model: appController.boardPublishedModel },
+        { title: "Reviewing", status: "reviewing", model: appController.boardReviewingModel }
     ]
+    property var contentStatuses: [
+        "inbox",
+        "clarifying",
+        "shaping",
+        "drafting",
+        "ready",
+        "scheduled",
+        "published",
+        "reviewing",
+        "archived"
+    ]
+    property var publicationStatuses: [
+        "planned",
+        "scheduled",
+        "published"
+    ]
+    property string activeSelectedText: {
+        const item = window.activeFocusItem
+        if (!item || item.selectedText === undefined || item.selectedText === null) {
+            return ""
+        }
+        return item.selectedText.toString()
+    }
+    property bool activeHasSelection: activeSelectedText.length > 0
+    property var calendarSections: []
 
-    header: ToolBar {
-        RowLayout {
+    function copyCurrentSelection() {
+        const item = window.activeFocusItem
+        if (!item || !window.activeHasSelection) {
+            return
+        }
+
+        if (item.copy !== undefined) {
+            item.copy()
+            return
+        }
+
+        appController.copyTextToClipboard(window.activeSelectedText)
+    }
+
+    function rebuildCalendarSections() {
+        const sections = []
+        const model = appController.calendarModel
+        const todayKey = Qt.formatDate(new Date(), "yyyy-MM-dd")
+        let currentSection = null
+
+        for (let index = 0; index < model.count(); ++index) {
+            const entry = model.entryAt(index)
+            const dateKey = Qt.formatDate(entry.scheduledAt, "yyyy-MM-dd")
+
+            if (!currentSection || currentSection.dateKey !== dateKey) {
+                currentSection = {
+                    dateKey: dateKey,
+                    isToday: dateKey === todayKey,
+                    hasContent: false,
+                    hasPublication: false,
+                    items: []
+                }
+                sections.push(currentSection)
+            }
+
+            if (entry.sourceType === "publication") {
+                currentSection.hasPublication = true
+            } else {
+                currentSection.hasContent = true
+            }
+
+            currentSection.items.push({
+                title: entry.title,
+                series: entry.series,
+                channel: entry.channel,
+                sourceType: entry.sourceType,
+                isOverdue: entry.isOverdue
+            })
+        }
+
+        calendarSections = sections
+    }
+
+    Component.onCompleted: rebuildCalendarSections()
+
+    Connections {
+        target: appController.calendarModel
+
+        function onModelReset() {
+            window.rebuildCalendarSections()
+        }
+    }
+
+    Action {
+        id: settingsAction
+        text: qsTr("Settings")
+        shortcut: StandardKey.Preferences
+        onTriggered: settingsDialog.open()
+    }
+
+    Action {
+        id: quitAction
+        text: qsTr("Quit")
+        shortcut: StandardKey.Quit
+        onTriggered: Qt.quit()
+    }
+
+    Action {
+        id: copyAction
+        text: qsTr("Copy")
+        shortcut: StandardKey.Copy
+        enabled: window.activeHasSelection
+        onTriggered: window.copyCurrentSelection()
+    }
+
+    Action {
+        id: pasteToIdeaAction
+        text: qsTr("Paste to Idea")
+        shortcut: StandardKey.Paste
+        enabled: appController.clipboardHasText
+        onTriggered: appController.pasteClipboardToIdea()
+    }
+
+    SettingsDialog {
+        id: settingsDialog
+        parent: Overlay.overlay
+    }
+
+    AboutDialog {
+        id: aboutDialog
+        parent: Overlay.overlay
+    }
+
+    Dialog {
+        id: deleteContentDialog
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        modal: true
+        focus: true
+        closePolicy: Popup.NoAutoClose
+        title: qsTr("Delete Content")
+        width: Math.min(window.width - 80, 420)
+        property string contentId: ""
+        property string pendingTitle: ""
+
+        function openForContent(contentId, contentTitle) {
+            if (!appSettings.confirmContentDeletion) {
+                appController.deleteContent(contentId)
+                return
+            }
+
+            deleteContentDialog.contentId = contentId
+            deleteContentDialog.pendingTitle = contentTitle
+            open()
+        }
+
+        ColumnLayout {
             anchors.fill: parent
-            anchors.margins: 8
+            anchors.margins: 20
+            spacing: 16
 
             Label {
-                text: "SmTool"
-                font.pixelSize: 20
-                font.bold: true
-            }
-
-            Item {
                 Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                text: deleteContentDialog.pendingTitle.length > 0
+                    ? qsTr("Delete \"%1\" and its related items?").arg(deleteContentDialog.pendingTitle)
+                    : qsTr("Delete this content and its related items?")
             }
 
+            DialogButtonBox {
+                Layout.fillWidth: true
+                standardButtons: DialogButtonBox.Ok | DialogButtonBox.Cancel
+
+                onAccepted: {
+                    if (appController.deleteContent(deleteContentDialog.contentId)) {
+                        deleteContentDialog.close()
+                    }
+                }
+                onRejected: deleteContentDialog.close()
+            }
+        }
+    }
+
+    Dialog {
+        id: burstDialog
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        modal: true
+        focus: true
+        closePolicy: Popup.NoAutoClose
+        title: qsTr("Create Burst")
+        width: Math.min(window.width - 80, 480)
+        height: Math.min(Math.max(window.height - 80, 900), 500)
+        property var optionsModel: []
+        property var selectedKeys: []
+
+        function openForSource() {
+            optionsModel = appController.burstTemplateOptions()
+            selectedKeys = optionsModel.map(function(option) { return option.key })
+            open()
+        }
+
+        function toggleSelection(key, checked) {
+            const nextSelection = selectedKeys.filter(function(existingKey) { return existingKey !== key })
+            if (checked) {
+                nextSelection.push(key)
+            }
+            selectedKeys = nextSelection
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 20
+            spacing: 16
+
             Label {
-                text: appController.statusMessage
-                color: "#444444"
-                Layout.preferredWidth: 520
-                horizontalAlignment: Text.AlignRight
-                elide: Text.ElideLeft
+                Layout.fillWidth: true
+                text: qsTr("Select the burst alternatives to create.")
+                wrapMode: Text.Wrap
+            }
+
+            ScrollView {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+
+                ColumnLayout {
+                    width: parent.width
+                    spacing: 8
+
+                    Repeater {
+                        model: burstDialog.optionsModel
+
+                        delegate: CheckBox {
+                            required property var modelData
+                            Layout.fillWidth: true
+                            text: modelData.displayName
+                            checked: burstDialog.selectedKeys.indexOf(modelData.key) >= 0
+                            onToggled: burstDialog.toggleSelection(modelData.key, checked)
+                        }
+                    }
+                }
+            }
+
+            DialogButtonBox {
+                Layout.fillWidth: true
+                standardButtons: DialogButtonBox.Save | DialogButtonBox.Cancel
+
+                onAccepted: {
+                    if (appController.createBurstForCurrentSource(burstDialog.selectedKeys)) {
+                        burstDialog.close()
+                    }
+                }
+                onRejected: burstDialog.close()
+            }
+        }
+    }
+
+    Dialog {
+        id: quickAddDialog
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        modal: true
+        focus: true
+        closePolicy: Popup.NoAutoClose
+        property string editingContentId: ""
+        property var publicationsModel: []
+        title: editingContentId.length > 0 ? qsTr("Edit Content") : qsTr("Quick Add")
+        width: Math.min(window.width - 40, 900)
+        height: Math.min(window.height - 40, 860)
+
+        function resetForm() {
+            editingContentId = ""
+            publicationsModel = []
+            inboxTitleField.clear()
+            inboxDescriptionField.clear()
+            priorityBox.value = 0
+            scheduledAtSelector.value = ""
+            if (statusBox.count > 0) {
+                statusBox.currentIndex = 0
+            }
+            if (pillarBox.count > 0) {
+                pillarBox.currentIndex = 0
+            }
+            if (channelBox.count > 0) {
+                channelBox.currentIndex = 0
+            }
+        }
+
+        function reloadPublications() {
+            if (editingContentId.length === 0) {
+                publicationsModel = []
+                return
+            }
+            const item = appController.contentDetails(editingContentId)
+            publicationsModel = item.publications ? item.publications : []
+        }
+
+        function openForCreate() {
+            resetForm()
+            open()
+        }
+
+        function openForEdit(contentId) {
+            const item = appController.contentDetails(contentId)
+            if (!item.id) {
+                return
+            }
+
+            editingContentId = item.id
+            inboxTitleField.text = item.title
+            inboxDescriptionField.text = item.description
+            priorityBox.value = item.priority
+            scheduledAtSelector.value = item.scheduledAt ? item.scheduledAt.slice(0, 10) : ""
+
+            const statusIndex = statusBox.indexOfValue(item.status)
+            if (statusIndex >= 0) {
+                statusBox.currentIndex = statusIndex
+            }
+
+            const pillarIndex = pillarBox.indexOfValue(item.pillarId)
+            if (pillarIndex >= 0) {
+                pillarBox.currentIndex = pillarIndex
+            }
+
+            if (item.suggestedChannelId && item.suggestedChannelId.length > 0) {
+                const channelIndex = channelBox.indexOfValue(item.suggestedChannelId)
+                if (channelIndex >= 0) {
+                    channelBox.currentIndex = channelIndex
+                }
+            } else if (channelBox.count > 0) {
+                channelBox.currentIndex = 0
+            }
+
+            publicationsModel = item.publications ? item.publications : []
+
+            open()
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 20
+            spacing: 16
+
+            ScrollView {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                contentWidth: availableWidth
+
+                ColumnLayout {
+                    width: parent.width
+                    spacing: 16
+
+                    Frame {
+                        Layout.fillWidth: true
+                        ColumnLayout {
+                            anchors.fill: parent
+                            spacing: 12
+
+                            RowLayout {
+                                Layout.fillWidth: true
+
+                                Label {
+                                    text: "Title"
+                                    Layout.preferredWidth: 80
+                                }
+
+                                TextField {
+                                    id: inboxTitleField
+                                    Layout.fillWidth: true
+                                    placeholderText: "Capture an idea"
+                                }
+                            }
+
+                            GridLayout {
+                                columns: 6
+                                columnSpacing: 12
+                                rowSpacing: 12
+                                Layout.fillWidth: true
+
+                                Label { text: "Pillar" }
+                                ComboBox {
+                                    id: pillarBox
+                                    Layout.fillWidth: true
+                                    model: appController.pillarModel
+                                    textRole: "displayName"
+                                    valueRole: "lookupId"
+                                }
+
+                                Label { text: "Ch" }
+                                ComboBox {
+                                    id: channelBox
+                                    Layout.fillWidth: true
+                                    model: appController.channelModel
+                                    textRole: "displayName"
+                                    valueRole: "lookupId"
+                                }
+
+                                Label { text: "Priority" }
+                                SpinBox {
+                                    id: priorityBox
+                                    from: 0
+                                    to: 100
+                                    value: 0
+                                }
+                            }
+
+                            GridLayout {
+                                columns: 4
+                                columnSpacing: 12
+                                rowSpacing: 12
+                                Layout.fillWidth: true
+
+                                Label { text: "Scheduled At" }
+                                DateSelector {
+                                    id: scheduledAtSelector
+                                    Layout.fillWidth: true
+                                }
+
+                                Label { text: "Status" }
+                                ComboBox {
+                                    id: statusBox
+                                    Layout.fillWidth: true
+                                    model: window.contentStatuses
+                                }
+                            }
+                        }
+                    }
+
+                    Frame {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+
+                        ColumnLayout {
+                            anchors.fill: parent
+                            spacing: 12
+
+                            Label {
+                                text: "Description"
+                                font.bold: true
+                            }
+
+                            TextArea {
+                                id: inboxDescriptionField
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                wrapMode: TextEdit.Wrap
+                                placeholderText: "Optional note"
+                            }
+
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
+                                visible: quickAddDialog.editingContentId.length > 0
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+
+                                    Label {
+                                        text: "Publishing"
+                                        font.bold: true
+                                    }
+
+                                    Item { Layout.fillWidth: true }
+
+                                    Button {
+                                        text: "Add Publication"
+                                        onClicked: publicationDialog.openForCreate(quickAddDialog.editingContentId)
+                                    }
+                                }
+
+                                Repeater {
+                                    model: quickAddDialog.publicationsModel
+
+                                    delegate: Rectangle {
+                                        required property var modelData
+                                        Layout.fillWidth: true
+                                        implicitHeight: publicationLayout.implicitHeight + 12
+                                        radius: 6
+                                        color: "#ffffff"
+                                        border.color: "#d6d6d6"
+
+                                        RowLayout {
+                                            id: publicationLayout
+                                            anchors.fill: parent
+                                            anchors.margins: 6
+                                            spacing: 8
+
+                                            ColumnLayout {
+                                                Layout.fillWidth: true
+
+                                                Label {
+                                                    text: [modelData.channelName, modelData.status].filter(function(v) { return v.length > 0 }).join(" | ")
+                                                    font.bold: true
+                                                    Layout.fillWidth: true
+                                                }
+
+                                                Label {
+                                                    text: [
+                                                        modelData.scheduledAt.length > 0 ? "Scheduled " + modelData.scheduledAt : "",
+                                                        modelData.publishedAt.length > 0 ? "Published " + modelData.publishedAt : ""
+                                                    ].filter(function(v) { return v.length > 0 }).join(" | ")
+                                                    visible: text.length > 0
+                                                    color: "#555555"
+                                                    Layout.fillWidth: true
+                                                    wrapMode: Text.Wrap
+                                                }
+
+                                                Label {
+                                                    text: modelData.url
+                                                    visible: text.length > 0
+                                                    color: "#555555"
+                                                    Layout.fillWidth: true
+                                                    wrapMode: Text.WrapAnywhere
+                                                }
+                                            }
+
+                                            ToolButton {
+                                                icon.name: "document-edit"
+                                                text: "Edit publication"
+                                                display: AbstractButton.IconOnly
+                                                ToolTip.visible: hovered
+                                                ToolTip.text: text
+                                                onClicked: publicationDialog.openForEdit(modelData.id)
+                                            }
+
+                                            ToolButton {
+                                                icon.name: "edit-delete"
+                                                text: "Delete publication"
+                                                display: AbstractButton.IconOnly
+                                                ToolTip.visible: hovered
+                                                ToolTip.text: text
+                                                onClicked: {
+                                                    if (appController.deletePublication(modelData.id)) {
+                                                        quickAddDialog.reloadPublications()
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            DialogButtonBox {
+                Layout.fillWidth: true
+                standardButtons: DialogButtonBox.Save | DialogButtonBox.Cancel
+
+                onAccepted: {
+                    const pillarId = pillarBox.currentIndex >= 0 ? pillarBox.currentValue : ""
+                    const channelId = channelBox.currentIndex >= 0 ? channelBox.currentValue : ""
+                    const status = statusBox.currentIndex >= 0 ? statusBox.currentText : "inbox"
+                    const ok = quickAddDialog.editingContentId.length > 0
+                        ? appController.updateContent(quickAddDialog.editingContentId,
+                                                      inboxTitleField.text,
+                                                      inboxDescriptionField.text,
+                                                      pillarId,
+                                                      priorityBox.value,
+                                                      scheduledAtSelector.value,
+                                                      channelId,
+                                                      status)
+                        : appController.createInboxItem(inboxTitleField.text,
+                                                        inboxDescriptionField.text,
+                                                        pillarId,
+                                                        "",
+                                                        priorityBox.value,
+                                                        scheduledAtSelector.value,
+                                                        channelId)
+                    if (ok) {
+                        quickAddDialog.resetForm()
+                        quickAddDialog.close()
+                    }
+                }
+
+                onRejected: {
+                    quickAddDialog.resetForm()
+                    quickAddDialog.close()
+                }
+            }
+        }
+    }
+
+    Dialog {
+        id: publicationDialog
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        modal: true
+        focus: true
+        closePolicy: Popup.NoAutoClose
+        property string contentId: ""
+        property string editingPublicationId: ""
+        title: editingPublicationId.length > 0 ? qsTr("Edit Publication") : qsTr("Add Publication")
+        width: Math.min(window.width - 80, 560)
+
+        function resetForm() {
+            contentId = ""
+            editingPublicationId = ""
+            if (publicationChannelBox.count > 0) {
+                publicationChannelBox.currentIndex = 0
+            }
+            publicationStatusBox.currentIndex = 0
+            publicationScheduledAtSelector.value = ""
+            publicationPublishedAtSelector.value = ""
+            publicationUrlField.clear()
+        }
+
+        function openForCreate(nextContentId) {
+            resetForm()
+            contentId = nextContentId
+            const item = appController.contentDetails(nextContentId)
+            if (item.suggestedChannelId && item.suggestedChannelId.length > 0) {
+                const channelIndex = publicationChannelBox.indexOfValue(item.suggestedChannelId)
+                if (channelIndex >= 0) {
+                    publicationChannelBox.currentIndex = channelIndex
+                }
+            }
+            open()
+        }
+
+        function openForEdit(publicationId) {
+            const publication = appController.publicationDetails(publicationId)
+            if (!publication.id) {
+                return
+            }
+
+            resetForm()
+            contentId = publication.contentId
+            editingPublicationId = publication.id
+            const channelIndex = publicationChannelBox.indexOfValue(publication.channelId)
+            if (channelIndex >= 0) {
+                publicationChannelBox.currentIndex = channelIndex
+            }
+            const statusIndex = publicationStatusBox.indexOfValue(publication.status)
+            if (statusIndex >= 0) {
+                publicationStatusBox.currentIndex = statusIndex
+            }
+            publicationScheduledAtSelector.value = publication.scheduledAt.length > 0
+                ? publication.scheduledAt.slice(0, 10)
+                : ""
+            publicationPublishedAtSelector.value = publication.publishedAt.length > 0
+                ? publication.publishedAt.slice(0, 10)
+                : ""
+            publicationUrlField.text = publication.url
+            open()
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 20
+            spacing: 16
+
+            GridLayout {
+                columns: 2
+                columnSpacing: 12
+                rowSpacing: 12
+                Layout.fillWidth: true
+
+                Label { text: "Channel" }
+                ComboBox {
+                    id: publicationChannelBox
+                    Layout.fillWidth: true
+                    model: appController.channelModel
+                    textRole: "displayName"
+                    valueRole: "lookupId"
+                }
+
+                Label { text: "Status" }
+                ComboBox {
+                    id: publicationStatusBox
+                    Layout.fillWidth: true
+                    model: window.publicationStatuses
+                }
+
+                Label { text: "Scheduled At" }
+                DateSelector {
+                    id: publicationScheduledAtSelector
+                    Layout.fillWidth: true
+                }
+
+                Label { text: "Published At" }
+                DateSelector {
+                    id: publicationPublishedAtSelector
+                    Layout.fillWidth: true
+                }
+
+                Label { text: "URL" }
+                TextField {
+                    id: publicationUrlField
+                    Layout.fillWidth: true
+                    placeholderText: "https://..."
+                }
+            }
+
+            DialogButtonBox {
+                Layout.fillWidth: true
+                standardButtons: DialogButtonBox.Save | DialogButtonBox.Cancel
+
+                onAccepted: {
+                    const channelId = publicationChannelBox.currentIndex >= 0 ? publicationChannelBox.currentValue : ""
+                    const status = publicationStatusBox.currentIndex >= 0 ? publicationStatusBox.currentText : "planned"
+                    if (appController.savePublication(publicationDialog.contentId,
+                                                      publicationDialog.editingPublicationId,
+                                                      channelId,
+                                                      status,
+                                                      publicationScheduledAtSelector.value,
+                                                      publicationPublishedAtSelector.value,
+                                                      publicationUrlField.text)) {
+                        quickAddDialog.reloadPublications()
+                        publicationDialog.resetForm()
+                        publicationDialog.close()
+                    }
+                }
+
+                onRejected: {
+                    publicationDialog.resetForm()
+                    publicationDialog.close()
+                }
+            }
+        }
+    }
+
+    Dialog {
+        id: createSeriesDialog
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        modal: true
+        focus: true
+        closePolicy: Popup.NoAutoClose
+        title: qsTr("Create Series")
+        width: Math.min(window.width - 80, 620)
+
+        function resetForm() {
+            seriesNameField.clear()
+            seriesDescriptionField.clear()
+            if (seriesPillarBox.count > 0) {
+                seriesPillarBox.currentIndex = 0
+            }
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 20
+            spacing: 16
+
+            GridLayout {
+                columns: 2
+                columnSpacing: 12
+                rowSpacing: 12
+                Layout.fillWidth: true
+
+                Label { text: "Name" }
+                TextField {
+                    id: seriesNameField
+                    Layout.fillWidth: true
+                    placeholderText: "Series name"
+                }
+
+                Label { text: "Description" }
+                TextArea {
+                    id: seriesDescriptionField
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 120
+                    wrapMode: TextEdit.Wrap
+                }
+
+                Label { text: "Pillar" }
+                ComboBox {
+                    id: seriesPillarBox
+                    Layout.fillWidth: true
+                    model: appController.pillarModel
+                    textRole: "displayName"
+                    valueRole: "lookupId"
+                }
+            }
+
+            DialogButtonBox {
+                Layout.fillWidth: true
+                standardButtons: DialogButtonBox.Save | DialogButtonBox.Cancel
+
+                onAccepted: {
+                    const pillarId = seriesPillarBox.currentIndex >= 0 ? seriesPillarBox.currentValue : ""
+                    if (appController.createSeries(seriesNameField.text, seriesDescriptionField.text, pillarId)) {
+                        createSeriesDialog.resetForm()
+                        createSeriesDialog.close()
+                    }
+                }
+
+                onRejected: {
+                    createSeriesDialog.resetForm()
+                    createSeriesDialog.close()
+                }
+            }
+        }
+    }
+
+    menuBar: MenuBar {
+        Menu {
+            title: qsTr("&App")
+
+            MenuItem { action: settingsAction }
+
+            MenuSeparator {}
+
+            MenuItem { action: quitAction }
+        }
+
+        Menu {
+            title: qsTr("&Edit")
+
+            MenuItem { action: copyAction }
+            MenuItem { action: pasteToIdeaAction }
+        }
+
+        Menu {
+            title: qsTr("&Help")
+
+            MenuItem {
+                text: qsTr("Blog")
+                enabled: appInfo.blogUrl.length > 0
+                onTriggered: Qt.openUrlExternally(appInfo.blogUrl)
+            }
+
+            MenuItem {
+                text: qsTr("About")
+                onTriggered: aboutDialog.open()
             }
         }
     }
@@ -76,126 +879,74 @@ ApplicationWindow {
                 spacing: 16
 
                 SectionCard {
-                    title: "Quick Add"
+                    Layout.fillWidth: true
+                    title: "Inbox"
 
-                    GridLayout {
-                        columns: 2
-                        columnSpacing: 12
-                        rowSpacing: 12
+                    ListView {
                         Layout.fillWidth: true
+                        Layout.preferredHeight: Math.max(420, contentHeight)
+                        clip: true
+                        model: appController.inboxModel
+                        spacing: 8
 
-                        Label { text: "Title" }
-                        TextField {
-                            id: inboxTitleField
-                            Layout.fillWidth: true
-                            placeholderText: "Capture an idea"
-                        }
+                        delegate: ContentSummaryCard {
+                            width: ListView.view.width
+                            titleText: title
+                            bodyText: description
+                            metaText: [pillar, kind, suggestedChannel].filter(function(value) { return value.length > 0 }).join(" | ")
+                            onEditRequested: quickAddDialog.openForEdit(itemId)
+                            onDeleteRequested: deleteContentDialog.openForContent(itemId, title)
 
-                        Label { text: "Description" }
-                        TextArea {
-                            id: inboxDescriptionField
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: 80
-                            wrapMode: TextEdit.Wrap
-                            placeholderText: "Optional note"
-                        }
-
-                        Label { text: "Pillar" }
-                        ComboBox {
-                            id: pillarBox
-                            Layout.fillWidth: true
-                            model: appController.pillarModel
-                            textRole: "displayName"
-                            valueRole: "lookupId"
-                        }
-
-                        Label { text: "Suggested Channel" }
-                        ComboBox {
-                            id: channelBox
-                            Layout.fillWidth: true
-                            model: appController.channelModel
-                            textRole: "displayName"
-                            valueRole: "lookupId"
-                        }
-
-                        Label { text: "Priority" }
-                        SpinBox {
-                            id: priorityBox
-                            from: 0
-                            to: 100
-                            value: 0
-                        }
-
-                        Item { }
-                        Button {
-                            text: "Add to Inbox"
-                            onClicked: {
-                                const pillarId = pillarBox.currentIndex >= 0 ? pillarBox.currentValue : ""
-                                const channelId = channelBox.currentIndex >= 0 ? channelBox.currentValue : ""
-                                if (appController.createInboxItem(inboxTitleField.text, inboxDescriptionField.text, pillarId, "", priorityBox.value, channelId)) {
-                                    inboxTitleField.clear()
-                                    inboxDescriptionField.clear()
-                                    priorityBox.value = 0
+                            RowLayout {
+                                Button {
+                                    text: "Clarifying"
+                                    onClicked: appController.moveContentToStatus(itemId, "clarifying")
+                                }
+                                Button {
+                                    text: "Shaping"
+                                    onClicked: appController.moveContentToStatus(itemId, "shaping")
                                 }
                             }
                         }
                     }
                 }
 
-                SectionCard {
-                    title: "Inbox"
+                RowLayout {
+                    Layout.fillWidth: true
 
-                    ListView {
+                    Item {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 420
-                        clip: true
-                        model: appController.inboxModel
-                        spacing: 8
+                    }
 
-                        delegate: Rectangle {
-                            width: ListView.view.width
-                            radius: 6
+                    Button {
+                        text: "Quick Add"
+                        contentItem: Text {
+                            text: parent.text
                             color: "white"
-                            border.color: "#d5d5d5"
-                            implicitHeight: contentLayout.implicitHeight + 16
-
-                            ColumnLayout {
-                                id: contentLayout
-                                anchors.fill: parent
-                                anchors.margins: 8
-                                spacing: 6
-
-                                Label {
-                                    text: title
-                                    font.bold: true
-                                    Layout.fillWidth: true
-                                }
-
-                                Label {
-                                    text: description
-                                    visible: text.length > 0
-                                    wrapMode: Text.Wrap
-                                    Layout.fillWidth: true
-                                }
-
-                                Label {
-                                    text: [pillar, kind, suggestedChannel].filter(function(value) { return value.length > 0 }).join(" | ")
-                                    color: "#555555"
-                                    Layout.fillWidth: true
-                                }
-
-                                RowLayout {
-                                    Button {
-                                        text: "Clarifying"
-                                        onClicked: appController.moveContentToStatus(itemId, "clarifying")
-                                    }
-                                    Button {
-                                        text: "Shaping"
-                                        onClicked: appController.moveContentToStatus(itemId, "shaping")
-                                    }
-                                }
-                            }
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
                         }
+                        background: Rectangle {
+                            radius: 6
+                            color: "#2e7d32"
+                        }
+                        onClicked: quickAddDialog.openForCreate()
+                    }
+
+                    Button {
+                        text: "Add from Clipboard"
+                        enabled: appController.clipboardHasText
+                        contentItem: Text {
+                            text: parent.text
+                            color: "#202020"
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        background: Rectangle {
+                            radius: 6
+                            color: enabled ? "#f2c94c" : "#d9d0a7"
+                        }
+                        onClicked: appController.pasteClipboardToIdea()
                     }
                 }
             }
@@ -208,7 +959,7 @@ ApplicationWindow {
                 spacing: 12
 
                 RowLayout {
-                    CheckBox {
+                    Switch {
                         text: "Show archived"
                         checked: appController.boardShowArchived
                         onToggled: appController.boardShowArchived = checked
@@ -221,15 +972,21 @@ ApplicationWindow {
                 }
 
                 Flickable {
+                    id: boardFlickable
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     clip: true
-                    contentWidth: boardRow.implicitWidth
-                    contentHeight: boardRow.implicitHeight
+                    contentWidth: boardRow.width
+                    contentHeight: boardRow.height
+                    boundsBehavior: Flickable.StopAtBounds
+                    ScrollBar.horizontal: ScrollBar {
+                        policy: ScrollBar.AlwaysOn
+                    }
 
-                    RowLayout {
+                    Row {
                         id: boardRow
                         spacing: 12
+                        height: boardFlickable.height
 
                         Repeater {
                             model: window.boardColumns.length
@@ -237,17 +994,23 @@ ApplicationWindow {
                                 required property int index
                                 property var columnData: window.boardColumns[index]
 
-                                title: columnData.title
+                                columnTitle: columnData.title
+                                statusKey: columnData.status
                                 model: columnData.model
-                                height: parent.height
+                                editDialog: quickAddDialog
+                                dragLayer: window.contentItem
+                                height: boardFlickable.height
                             }
                         }
 
                         BoardColumn {
                             visible: appController.boardShowArchived
-                            title: "Archived"
+                            columnTitle: "Archived"
+                            statusKey: "archived"
                             model: appController.boardArchivedModel
-                            height: parent.height
+                            editDialog: quickAddDialog
+                            dragLayer: window.contentItem
+                            height: boardFlickable.height
                         }
                     }
                 }
@@ -265,43 +1028,163 @@ ApplicationWindow {
                 SectionCard {
                     title: "Calendar"
 
-                    ListView {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 760
-                        clip: true
-                        model: appController.calendarModel
-                        spacing: 8
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
 
-                        delegate: Rectangle {
-                            width: ListView.view.width
-                            radius: 6
-                            color: "white"
-                            border.color: "#d5d5d5"
-                            implicitHeight: infoLayout.implicitHeight + 16
+                            RowLayout {
+                                Layout.fillWidth: true
 
-                            ColumnLayout {
-                                id: infoLayout
-                                anchors.fill: parent
-                                anchors.margins: 8
-                                spacing: 4
-
-                                Label {
-                                    text: title
-                                    font.bold: true
+                                Switch {
+                                    text: "Show archived"
+                                    checked: appController.calendarIncludeArchived
+                                    onToggled: appController.calendarIncludeArchived = checked
                                 }
 
-                                Label {
-                                    text: Qt.formatDateTime(scheduledAt, "yyyy-MM-dd hh:mm") + " | " + sourceType + (channel.length ? " | " + channel : "")
+                                Switch {
+                                    text: "Show published"
+                                    checked: appController.calendarIncludePublished
+                                    onToggled: appController.calendarIncludePublished = checked
                                 }
 
-                                Label {
-                                    text: series
-                                    visible: text.length > 0
-                                    color: "#555555"
+                                Item {
+                                    Layout.fillWidth: true
+                                }
+                            }
+
+                            ScrollView {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 716
+                                clip: true
+
+                                ColumnLayout {
+                                    width: parent.width
+                                    spacing: 12
+
+                                    Repeater {
+                                        model: window.calendarSections
+
+                                        delegate: Frame {
+                                            required property var modelData
+                                            Layout.fillWidth: true
+                                            padding: 12
+                                            background: Rectangle {
+                                                radius: 8
+                                                color: "#ffffff"
+                                                border.width: modelData.isToday ? 2 : 1
+                                                border.color: modelData.isToday ? "#2f9e44" : "#d5d5d5"
+                                            }
+
+                                            ColumnLayout {
+                                                anchors.fill: parent
+                                                spacing: 8
+
+                                                RowLayout {
+                                                    Layout.fillWidth: true
+
+                                                    Label {
+                                                        text: modelData.dateKey
+                                                        font.bold: true
+                                                        font.pixelSize: 18
+                                                        color: "#111111"
+                                                    }
+
+                                                    Rectangle {
+                                                        visible: modelData.hasContent
+                                                        radius: 10
+                                                        color: "#3f6fa8"
+                                                        implicitHeight: 24
+                                                        implicitWidth: createBadgeLabel.implicitWidth + 18
+
+                                                        Label {
+                                                            id: createBadgeLabel
+                                                            anchors.centerIn: parent
+                                                            text: "Create"
+                                                            color: "white"
+                                                            font.bold: true
+                                                        }
+                                                    }
+
+                                                    Rectangle {
+                                                        visible: modelData.hasPublication
+                                                        radius: 10
+                                                        color: "#3d7f4a"
+                                                        implicitHeight: 24
+                                                        implicitWidth: publishBadgeLabel.implicitWidth + 18
+
+                                                        Label {
+                                                            id: publishBadgeLabel
+                                                            anchors.centerIn: parent
+                                                            text: "Publish"
+                                                            color: "white"
+                                                            font.bold: true
+                                                        }
+                                                    }
+
+                                                    Item {
+                                                        Layout.fillWidth: true
+                                                    }
+                                                }
+
+                                                Repeater {
+                                                    model: modelData.items
+
+                                                    delegate: Rectangle {
+                                                        required property var modelData
+                                                        Layout.fillWidth: true
+                                                        radius: 6
+                                                        color: modelData.sourceType === "publication" ? "#e7f6e9" : "#e8f2ff"
+                                                        border.width: modelData.isOverdue ? 2 : 1
+                                                        border.color: modelData.isOverdue
+                                                            ? "#d94841"
+                                                            : (modelData.sourceType === "publication" ? "#b7d9bf" : "#bfd4ee")
+                                                        implicitHeight: calendarCardLayout.implicitHeight + 16
+
+                                                        ColumnLayout {
+                                                            id: calendarCardLayout
+                                                            anchors.fill: parent
+                                                            anchors.margins: 8
+                                                            spacing: 4
+
+                                                            Rectangle {
+                                                                radius: 10
+                                                                color: modelData.sourceType === "publication" ? "#3d7f4a" : "#3f6fa8"
+                                                                implicitHeight: 24
+                                                                implicitWidth: calendarTypeLabel.implicitWidth + 18
+
+                                                                Label {
+                                                                    id: calendarTypeLabel
+                                                                    anchors.centerIn: parent
+                                                                    text: modelData.sourceType === "publication" ? "Publish" : "Create"
+                                                                    color: "white"
+                                                                    font.bold: true
+                                                                }
+                                                            }
+
+                                                            Label {
+                                                                text: modelData.title
+                                                                font.bold: true
+                                                                color: "#111111"
+                                                                wrapMode: Text.Wrap
+                                                                Layout.fillWidth: true
+                                                            }
+
+                                                            Label {
+                                                                text: [modelData.series, modelData.channel].filter(function(value) { return value.length > 0 }).join(" | ")
+                                                                visible: text.length > 0
+                                                                color: "#555555"
+                                                                wrapMode: Text.Wrap
+                                                                Layout.fillWidth: true
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
-                    }
                 }
             }
         }
@@ -330,7 +1213,7 @@ ApplicationWindow {
                             model: appController.sourceModel
                             spacing: 8
 
-                            delegate: Rectangle {
+                            delegate: ContentSummaryCard {
                                 required property string itemId
                                 required property string title
                                 required property string kind
@@ -339,40 +1222,19 @@ ApplicationWindow {
                                 required property string suggestedChannel
 
                                 width: ListView.view.width
-                                radius: 6
-                                color: appController.currentSourceId === itemId ? "#e8f2ff" : "white"
-                                border.color: "#d5d5d5"
-                                implicitHeight: sourceLayout.implicitHeight + 16
-
-                                MouseArea {
-                                    anchors.fill: parent
-                                    onClicked: appController.currentSourceId = itemId
-                                }
-
-                                ColumnLayout {
-                                    id: sourceLayout
-                                    anchors.fill: parent
-                                    anchors.margins: 8
-                                    spacing: 4
-
-                                    Label {
-                                        text: title
-                                        font.bold: true
-                                    }
-
-                                    Label {
-                                        text: [kind, status, series, suggestedChannel].filter(function(value) { return value.length > 0 }).join(" | ")
-                                        color: "#555555"
-                                        wrapMode: Text.Wrap
-                                    }
-                                }
+                                selected: appController.currentSourceId === itemId
+                                titleText: title
+                                metaText: [kind, status, series, suggestedChannel].filter(function(value) { return value.length > 0 }).join(" | ")
+                                onClicked: appController.currentSourceId = itemId
+                                onEditRequested: quickAddDialog.openForEdit(itemId)
+                                onDeleteRequested: deleteContentDialog.openForContent(itemId, title)
                             }
                         }
 
                         Button {
                             text: "Create Burst From Source"
                             enabled: appController.currentSourceId.length > 0
-                            onClicked: appController.createBurstForCurrentSource()
+                            onClicked: burstDialog.openForSource()
                         }
                     }
                 }
@@ -389,34 +1251,17 @@ ApplicationWindow {
                         model: appController.derivativeModel
                         spacing: 8
 
-                        delegate: Rectangle {
+                        delegate: ContentSummaryCard {
                             width: ListView.view.width
-                            radius: 6
-                            color: "white"
-                            border.color: "#d5d5d5"
-                            implicitHeight: derivativeLayout.implicitHeight + 16
+                            titleText: title
+                            metaText: [kind, outcome, suggestedChannel, status].filter(function(value) { return value.length > 0 }).join(" | ")
+                            onEditRequested: quickAddDialog.openForEdit(itemId)
+                            onDeleteRequested: deleteContentDialog.openForContent(itemId, title)
 
-                            ColumnLayout {
-                                id: derivativeLayout
-                                anchors.fill: parent
-                                anchors.margins: 8
-                                spacing: 4
-
-                                Label {
-                                    text: title
-                                    font.bold: true
-                                }
-
-                                Label {
-                                    text: [kind, outcome, suggestedChannel, status].filter(function(value) { return value.length > 0 }).join(" | ")
-                                    wrapMode: Text.Wrap
-                                }
-
-                                Label {
-                                    text: "Template: " + burstTemplateKey
-                                    visible: burstTemplateKey.length > 0
-                                    color: "#555555"
-                                }
+                            Label {
+                                text: "Template: " + burstTemplateKey
+                                visible: burstTemplateKey.length > 0
+                                color: "#555555"
                             }
                         }
                     }
@@ -433,58 +1278,12 @@ ApplicationWindow {
                 spacing: 16
 
                 SectionCard {
-                    title: "Create Series"
-
-                    GridLayout {
-                        columns: 2
-                        columnSpacing: 12
-                        rowSpacing: 12
-                        Layout.fillWidth: true
-
-                        Label { text: "Name" }
-                        TextField {
-                            id: seriesNameField
-                            Layout.fillWidth: true
-                            placeholderText: "Series name"
-                        }
-
-                        Label { text: "Description" }
-                        TextArea {
-                            id: seriesDescriptionField
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: 80
-                            wrapMode: TextEdit.Wrap
-                        }
-
-                        Label { text: "Pillar" }
-                        ComboBox {
-                            id: seriesPillarBox
-                            Layout.fillWidth: true
-                            model: appController.pillarModel
-                            textRole: "displayName"
-                            valueRole: "lookupId"
-                        }
-
-                        Item { }
-                        Button {
-                            text: "Create Series"
-                            onClicked: {
-                                const pillarId = seriesPillarBox.currentIndex >= 0 ? seriesPillarBox.currentValue : ""
-                                if (appController.createSeries(seriesNameField.text, seriesDescriptionField.text, pillarId)) {
-                                    seriesNameField.clear()
-                                    seriesDescriptionField.clear()
-                                }
-                            }
-                        }
-                    }
-                }
-
-                SectionCard {
+                    Layout.fillWidth: true
                     title: "Series"
 
                     ListView {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 520
+                        Layout.preferredHeight: Math.max(520, contentHeight)
                         clip: true
                         model: appController.seriesModel
                         spacing: 8
@@ -520,6 +1319,29 @@ ApplicationWindow {
                         }
                     }
                 }
+
+                RowLayout {
+                    Layout.fillWidth: true
+
+                    Item {
+                        Layout.fillWidth: true
+                    }
+
+                    Button {
+                        text: "Create Series"
+                        contentItem: Text {
+                            text: parent.text
+                            color: "white"
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        background: Rectangle {
+                            radius: 6
+                            color: "#2e7d32"
+                        }
+                        onClicked: createSeriesDialog.open()
+                    }
+                }
             }
         }
 
@@ -531,7 +1353,7 @@ ApplicationWindow {
                 width: parent.width
                 spacing: 16
 
-                CheckBox {
+                Switch {
                     text: "Include archived"
                     checked: appController.dashboardIncludeArchived
                     onToggled: appController.dashboardIncludeArchived = checked
@@ -606,6 +1428,21 @@ ApplicationWindow {
                         delegate: Label { text: label + (secondary.length ? " | " + secondary : "") }
                     }
                 }
+            }
+        }
+    }
+
+    footer: ToolBar {
+        RowLayout {
+            anchors.fill: parent
+            anchors.margins: 8
+
+            Label {
+                text: appController.statusMessage
+                color: "#444444"
+                Layout.fillWidth: true
+                horizontalAlignment: Text.AlignLeft
+                elide: Text.ElideRight
             }
         }
     }

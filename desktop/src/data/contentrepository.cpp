@@ -29,6 +29,43 @@ QVariant nullableDateTime(const QDateTime &value)
     return value.isValid() ? QVariant{value.toString(Qt::ISODate)} : QVariant{};
 }
 
+bool removeContentTree(QSqlDatabase &db, const QString &id, QString *errorMessage)
+{
+    QSqlQuery childQuery{db};
+    childQuery.prepare(QStringLiteral("SELECT id FROM content WHERE parent_id = :parent_id"));
+    childQuery.bindValue(":parent_id"_L1, id);
+    if (!childQuery.exec()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = childQuery.lastError().text();
+        }
+        return false;
+    }
+
+    while (childQuery.next()) {
+        if (!removeContentTree(db, childQuery.value(0).toString(), errorMessage)) {
+            return false;
+        }
+    }
+
+    for (const auto &statement : {
+             QStringLiteral("DELETE FROM publication WHERE content_id = :id"),
+             QStringLiteral("DELETE FROM note WHERE content_id = :id"),
+             QStringLiteral("DELETE FROM content WHERE id = :id"),
+         }) {
+        QSqlQuery query{db};
+        query.prepare(statement);
+        query.bindValue(":id"_L1, id);
+        if (!query.exec()) {
+            if (errorMessage != nullptr) {
+                *errorMessage = query.lastError().text();
+            }
+            return false;
+        }
+    }
+
+    return true;
+}
+
 QString selectSummaryBase()
 {
     return QStringLiteral(
@@ -104,6 +141,30 @@ std::vector<Domain::ContentSummary> ContentRepository::childItems(const QString 
     return runSummaryQuery(query);
 }
 
+std::vector<Domain::BurstTemplate> ContentRepository::activeBurstTemplates() const
+{
+    QSqlQuery query{database_};
+    query.prepare(QStringLiteral(
+        "SELECT key, display_name, title_suffix, kind_id, COALESCE(suggested_channel_id, ''), COALESCE(outcome_id, '') "
+        "FROM burst_template "
+        "WHERE is_active = 1 "
+        "ORDER BY display_name ASC"));
+    query.exec();
+
+    std::vector<Domain::BurstTemplate> results;
+    while (query.next()) {
+        results.push_back({
+            .key = query.value(0).toString(),
+            .displayName = query.value(1).toString(),
+            .titleSuffix = query.value(2).toString(),
+            .kindId = query.value(3).toString(),
+            .suggestedChannelId = query.value(4).toString(),
+            .outcomeId = query.value(5).toString(),
+        });
+    }
+    return results;
+}
+
 QString ContentRepository::create(const Domain::ContentItem &content, QString *errorMessage) const
 {
     if (!Domain::isValidContentStatus(content.status)) {
@@ -159,6 +220,79 @@ QString ContentRepository::create(const Domain::ContentItem &content, QString *e
     return id;
 }
 
+bool ContentRepository::update(const Domain::ContentItem &content, QString *errorMessage) const
+{
+    if (content.id.trimmed().isEmpty()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("Content id is required");
+        }
+        return false;
+    }
+    if (!Domain::isValidContentStatus(content.status)) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("Invalid content status: %1").arg(content.status);
+        }
+        return false;
+    }
+    if (content.title.trimmed().isEmpty()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("Title is required");
+        }
+        return false;
+    }
+    if (content.priority < 0 || content.priority > 100) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("Priority out of range");
+        }
+        return false;
+    }
+
+    const auto existing = getContentById(content.id);
+    if (existing.id.isEmpty()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("Content not found");
+        }
+        return false;
+    }
+
+    const auto updatedAt = QDateTime::currentDateTimeUtc();
+    const auto publishedAt = content.status == "published"_L1 && !existing.publishedAt.isValid()
+        ? updatedAt
+        : existing.publishedAt;
+
+    QSqlQuery query{database_};
+    query.prepare(QStringLiteral(
+        "UPDATE content SET "
+        "title = :title, "
+        "description = :description, "
+        "pillar_id = :pillar_id, "
+        "suggested_channel_id = :suggested_channel_id, "
+        "status = :status, "
+        "priority = :priority, "
+        "scheduled_at = :scheduled_at, "
+        "published_at = :published_at, "
+        "updated_at = :updated_at "
+        "WHERE id = :id"));
+    query.bindValue(":id"_L1, content.id);
+    query.bindValue(":title"_L1, content.title.trimmed());
+    query.bindValue(":description"_L1, nullableString(content.description.trimmed()));
+    query.bindValue(":pillar_id"_L1, content.pillarId);
+    query.bindValue(":suggested_channel_id"_L1, nullableString(content.suggestedChannelId));
+    query.bindValue(":status"_L1, content.status);
+    query.bindValue(":priority"_L1, content.priority);
+    query.bindValue(":scheduled_at"_L1, nullableDateTime(content.scheduledAt));
+    query.bindValue(":published_at"_L1, nullableDateTime(publishedAt));
+    query.bindValue(":updated_at"_L1, updatedAt.toString(Qt::ISODate));
+    if (query.exec()) {
+        return true;
+    }
+
+    if (errorMessage != nullptr) {
+        *errorMessage = query.lastError().text();
+    }
+    return false;
+}
+
 bool ContentRepository::updateStatus(const QString &id, const QString &newStatus, QString *errorMessage) const
 {
     const auto existing = getContentById(id);
@@ -169,9 +303,9 @@ bool ContentRepository::updateStatus(const QString &id, const QString &newStatus
         return false;
     }
 
-    if (!Domain::canTransitionContentStatus(existing.status, newStatus)) {
+    if (!Domain::isValidContentStatus(newStatus)) {
         if (errorMessage != nullptr) {
-            *errorMessage = QStringLiteral("Invalid transition from %1 to %2").arg(existing.status, newStatus);
+            *errorMessage = QStringLiteral("Invalid content status: %1").arg(newStatus);
         }
         return false;
     }
@@ -199,7 +333,51 @@ bool ContentRepository::updateStatus(const QString &id, const QString &newStatus
     return false;
 }
 
+bool ContentRepository::remove(const QString &id, QString *errorMessage) const
+{
+    if (id.trimmed().isEmpty()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("Content id is required");
+        }
+        return false;
+    }
+
+    const auto existing = getContentById(id);
+    if (existing.id.isEmpty()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("Content not found");
+        }
+        return false;
+    }
+
+    auto db = database_;
+    if (!db.transaction()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = db.lastError().text();
+        }
+        return false;
+    }
+
+    if (!removeContentTree(db, id, errorMessage)) {
+        db.rollback();
+        return false;
+    }
+
+    return db.commit();
+}
+
 bool ContentRepository::createBurst(const QString &sourceContentId, QString *errorMessage) const
+{
+    QStringList templateKeys;
+    for (const auto &burstTemplate : activeBurstTemplates()) {
+        templateKeys.append(burstTemplate.key);
+    }
+    return createBurst(sourceContentId, templateKeys, errorMessage);
+}
+
+bool ContentRepository::createBurst(const QString &sourceContentId,
+                                    const QStringList &templateKeys,
+                                    QString *errorMessage) const
 {
     const auto source = getContentById(sourceContentId);
     if (source.id.isEmpty()) {
@@ -214,6 +392,12 @@ bool ContentRepository::createBurst(const QString &sourceContentId, QString *err
         }
         return false;
     }
+    if (templateKeys.isEmpty()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("Select at least one burst alternative");
+        }
+        return false;
+    }
 
     auto db = database_;
     if (!db.transaction()) {
@@ -224,21 +408,26 @@ bool ContentRepository::createBurst(const QString &sourceContentId, QString *err
     }
 
     QSqlQuery templateQuery{db};
-    templateQuery.prepare(QStringLiteral(
-        "SELECT bt.key, bt.title_suffix, bt.kind_id, bt.outcome_id, bt.suggested_channel_id "
-        "FROM burst_template bt "
-        "WHERE bt.is_active = 1 "
-        "ORDER BY bt.key ASC"));
-    if (!templateQuery.exec()) {
-        if (errorMessage != nullptr) {
-            *errorMessage = templateQuery.lastError().text();
+    for (const auto &burstTemplateKey : templateKeys) {
+        templateQuery.prepare(QStringLiteral(
+            "SELECT bt.key, bt.title_suffix, bt.kind_id, bt.outcome_id, bt.suggested_channel_id "
+            "FROM burst_template bt "
+            "WHERE bt.key = :key AND bt.is_active = 1"));
+        templateQuery.bindValue(":key"_L1, burstTemplateKey);
+        if (!templateQuery.exec()) {
+            if (errorMessage != nullptr) {
+                *errorMessage = templateQuery.lastError().text();
+            }
+            db.rollback();
+            return false;
         }
-        db.rollback();
-        return false;
-    }
-
-    while (templateQuery.next()) {
-        const auto burstTemplateKey = templateQuery.value(0).toString();
+        if (!templateQuery.next()) {
+            if (errorMessage != nullptr) {
+                *errorMessage = QStringLiteral("Burst alternative not found: %1").arg(burstTemplateKey);
+            }
+            db.rollback();
+            return false;
+        }
 
         QSqlQuery existingQuery{db};
         existingQuery.prepare(QStringLiteral(
@@ -279,6 +468,11 @@ bool ContentRepository::createBurst(const QString &sourceContentId, QString *err
     }
 
     return db.commit();
+}
+
+Domain::ContentItem ContentRepository::getById(const QString &id) const
+{
+    return getContentById(id);
 }
 
 std::vector<Domain::ContentSummary> ContentRepository::runSummaryQuery(QSqlQuery &query) const

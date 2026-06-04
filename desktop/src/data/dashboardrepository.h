@@ -13,7 +13,7 @@ class DashboardRepository
 public:
     explicit DashboardRepository(QSqlDatabase database);
 
-    [[nodiscard]] std::vector<Domain::CalendarEntry> calendarEntries() const;
+    [[nodiscard]] std::vector<Domain::CalendarEntry> calendarEntries(bool includeArchived, bool includePublished) const;
     [[nodiscard]] Domain::DashboardData dashboardData(bool includeArchived) const;
 
 private:

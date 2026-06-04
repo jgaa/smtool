@@ -1,6 +1,31 @@
 #include "models/contentlistmodel.h"
 
+#include <QRegularExpression>
+
+#include <algorithm>
+
 namespace SmTool::Models {
+namespace {
+
+QString normalizedWhitespace(QString text)
+{
+    text.replace(QRegularExpression(QStringLiteral("\\s+")), QStringLiteral(" "));
+    return text.trimmed();
+}
+
+QString firstSentence(const QString &text)
+{
+    const QRegularExpression sentencePattern(QStringLiteral(R"(^\s*(.+?[.!?])(?:\s|$))"),
+                                             QRegularExpression::DotMatchesEverythingOption);
+    const auto match = sentencePattern.match(text);
+    if (match.hasMatch()) {
+        return normalizedWhitespace(match.captured(1));
+    }
+
+    return normalizedWhitespace(text.section(u'\n', 0, 0));
+}
+
+} // namespace
 
 ContentListModel::ContentListModel(QObject *parent)
     : QAbstractListModel(parent)
@@ -30,6 +55,8 @@ QVariant ContentListModel::data(const QModelIndex &index, int role) const
         return item.title;
     case DescriptionRole:
         return item.description;
+    case DescriptionPreviewRole:
+        return descriptionPreview(item.description);
     case PillarRole:
         return item.pillarName;
     case SeriesRole:
@@ -61,6 +88,7 @@ QHash<int, QByteArray> ContentListModel::roleNames() const
         {BurstTemplateKeyRole, "burstTemplateKey"},
         {TitleRole, "title"},
         {DescriptionRole, "description"},
+        {DescriptionPreviewRole, "descriptionPreview"},
         {PillarRole, "pillar"},
         {SeriesRole, "series"},
         {KindRole, "kind"},
@@ -73,11 +101,44 @@ QHash<int, QByteArray> ContentListModel::roleNames() const
     };
 }
 
+void ContentListModel::setDescriptionPreviewWordCap(int value)
+{
+    const auto normalized = std::clamp(value, 3, 30);
+    if (descriptionPreviewWordCap_ == normalized) {
+        return;
+    }
+
+    descriptionPreviewWordCap_ = normalized;
+    if (rowCount() > 0) {
+        emit dataChanged(index(0, 0), index(rowCount() - 1, 0), {DescriptionPreviewRole});
+    }
+}
+
 void ContentListModel::setItems(std::vector<Domain::ContentSummary> items)
 {
     beginResetModel();
     items_ = std::move(items);
     endResetModel();
+}
+
+QString ContentListModel::descriptionPreview(const QString &text) const
+{
+    const auto sentence = firstSentence(text);
+    if (sentence.isEmpty()) {
+        return {};
+    }
+
+    const auto words = sentence.split(u' ', Qt::SkipEmptyParts);
+    if (words.size() <= descriptionPreviewWordCap_) {
+        return sentence;
+    }
+
+    QStringList clipped;
+    clipped.reserve(descriptionPreviewWordCap_);
+    for (int index = 0; index < descriptionPreviewWordCap_; ++index) {
+        clipped.append(words.at(index));
+    }
+    return clipped.join(u' ') + QStringLiteral("...");
 }
 
 } // namespace SmTool::Models

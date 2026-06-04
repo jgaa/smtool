@@ -80,7 +80,7 @@ The design goal is to minimize friction and context switching while maximizing i
 
 ## Current Status
 
-Under initial evelopment
+Under initial development
 
 The primary goal is to explore content workflows and gather experience before integrating similar capabilities into larger productivity systems.
 
@@ -102,19 +102,19 @@ cmake --build build/desktop --parallel
 ## Run
 
 ```bash
-./build/desktop/bin/MediaStrategy
+./build/desktop/bin/SmTool
 ```
 
 To seed demo content into an empty database:
 
 ```bash
-./build/desktop/bin/MediaStrategy --seed-demo-data
+./build/desktop/bin/SmTool --seed-demo-data
 ```
 
 To override the SQLite path explicitly:
 
 ```bash
-./build/desktop/bin/MediaStrategy --database-path /tmp/mediastrategy.sqlite
+./build/desktop/bin/SmTool --database-path /tmp/smtool.sqlite
 ```
 
 By default the application stores its database under `QStandardPaths::AppDataLocation`.
