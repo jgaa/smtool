@@ -12,6 +12,7 @@ ApplicationWindow {
     visible: true
     title: "SmTool"
     header: ToolBar {
+        height: 36
         RowLayout {
             anchors.fill: parent
             anchors.margins: 8
@@ -1069,6 +1070,7 @@ ApplicationWindow {
                     }
 
                     Button {
+                        height: 40
                         text: "Quick Add"
                         contentItem: Text {
                             text: parent.text
@@ -1084,6 +1086,7 @@ ApplicationWindow {
                     }
 
                     Button {
+                        height: 40
                         text: "Add from Clipboard"
                         enabled: appController.clipboardHasText
                         contentItem: Text {
