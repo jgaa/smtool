@@ -20,7 +20,7 @@ else()
 endif()
 FetchContent_MakeAvailable(logfault)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Quick Qml QuickControls2 Sql Test Widgets)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Network Quick Qml QuickControls2 Sql Test Widgets)
 
 qt_standard_project_setup(REQUIRES 6.5)
 
@@ -34,6 +34,7 @@ set(SMTOOL_SOURCES
     src/data/dashboardrepository.cpp
     src/data/database.cpp
     src/data/lookupsrepository.cpp
+    src/data/mediarepository.cpp
     src/data/publicationrepository.cpp
     src/data/seriesrepository.cpp
     src/models/calendarentrymodel.cpp
@@ -53,6 +54,7 @@ set(SMTOOL_HEADERS
     src/data/dashboardrepository.h
     src/data/database.h
     src/data/lookupsrepository.h
+    src/data/mediarepository.h
     src/data/publicationrepository.h
     src/data/seriesrepository.h
     src/domain/constants.h
@@ -87,6 +89,8 @@ qt_add_qml_module(SmToolApp
         src/ui/qml/components/BoardColumn.qml
         src/ui/qml/components/ContentSummaryCard.qml
         src/ui/qml/components/DateSelector.qml
+        src/ui/qml/components/MediaAttachmentsEditor.qml
+        src/ui/qml/components/MediaItemDialog.qml
         src/ui/qml/components/SectionCard.qml
 )
 
@@ -103,6 +107,7 @@ target_link_libraries(SmToolApp
     PRIVATE
         Qt6::Core
         Qt6::Gui
+        Qt6::Network
         Qt6::Quick
         Qt6::Qml
         Qt6::QuickControls2
@@ -121,6 +126,7 @@ qt_add_executable(SmToolTests
     src/data/dashboardrepository.cpp
     src/data/database.cpp
     src/data/lookupsrepository.cpp
+    src/data/mediarepository.cpp
     src/data/publicationrepository.cpp
     src/data/seriesrepository.cpp
     src/models/calendarentrymodel.cpp
@@ -146,6 +152,7 @@ target_link_libraries(SmToolTests
     PRIVATE
         Qt6::Core
         Qt6::Gui
+        Qt6::Network
         Qt6::Sql
         Qt6::Test
         Qt6::Widgets

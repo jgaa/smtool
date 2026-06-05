@@ -4,6 +4,7 @@
 #include "data/dashboardrepository.h"
 #include "data/database.h"
 #include "data/lookupsrepository.h"
+#include "data/mediarepository.h"
 #include "data/publicationrepository.h"
 #include "data/seriesrepository.h"
 
@@ -67,6 +68,7 @@ private slots:
     void searchesSeriesByNameAndDescription();
     void contentModelBuildsDescriptionPreview();
     void publicationCrudWorks();
+    void persistsMediaForContentAndPublication();
 };
 
 void DatabaseTests::createsSchemaAndSeedsDefaults()
@@ -975,6 +977,75 @@ void DatabaseTests::publicationCrudWorks()
 
     QVERIFY2(publicationRepository.remove(publicationId, &errorMessage), qPrintable(errorMessage));
     QVERIFY(publicationRepository.getById(publicationId).id.isEmpty());
+}
+
+void DatabaseTests::persistsMediaForContentAndPublication()
+{
+    SmTool::Data::Database database({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-media"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto lookups = SmTool::Data::LookupsRepository{database.connection()};
+    auto contentRepository = SmTool::Data::ContentRepository{database.connection()};
+    auto publicationRepository = SmTool::Data::PublicationRepository{database.connection()};
+    auto mediaRepository = SmTool::Data::MediaRepository{database.connection()};
+
+    const auto pillarId = lookups.lookupIdByKey(QStringLiteral("pillar"), QStringLiteral("tech"));
+    const auto kindId = lookups.lookupIdByKey(QStringLiteral("content_kind"), QStringLiteral("idea"));
+    const auto channelId = lookups.lookupIdByKey(QStringLiteral("channel"), QStringLiteral("linkedin"));
+
+    const auto contentId = contentRepository.create({
+        .title = QStringLiteral("Media source"),
+        .kindId = kindId,
+        .pillarId = pillarId,
+        .status = QStringLiteral("drafting"),
+        .priority = 10,
+        .createdAt = QDateTime::currentDateTimeUtc(),
+        .updatedAt = QDateTime::currentDateTimeUtc(),
+    }, &errorMessage);
+    QVERIFY2(!contentId.isEmpty(), qPrintable(errorMessage));
+
+    QVERIFY2(mediaRepository.replaceForContent(contentId, {
+        SmTool::Domain::MediaItem{
+            .name = QStringLiteral("Reference"),
+            .sourceType = QStringLiteral("url"),
+            .location = QStringLiteral("https://example.com/ref"),
+        },
+        SmTool::Domain::MediaItem{
+            .name = QStringLiteral("Screenshot"),
+            .sourceType = QStringLiteral("managed_file"),
+            .location = QStringLiteral("media/example.png"),
+        },
+    }, &errorMessage), qPrintable(errorMessage));
+
+    const auto contentMedia = mediaRepository.listForContent(contentId);
+    QCOMPARE(static_cast<int>(contentMedia.size()), 2);
+    QCOMPARE(contentMedia.front().name, QStringLiteral("Reference"));
+
+    const auto publicationId = publicationRepository.create({
+        .contentId = contentId,
+        .channelId = channelId,
+        .status = QStringLiteral("planned"),
+    }, &errorMessage);
+    QVERIFY2(!publicationId.isEmpty(), qPrintable(errorMessage));
+
+    QVERIFY2(mediaRepository.replaceForPublication(publicationId, {
+        SmTool::Domain::MediaItem{
+            .name = QStringLiteral("Published page"),
+            .sourceType = QStringLiteral("url"),
+            .location = QStringLiteral("https://example.com/published"),
+        },
+    }, &errorMessage), qPrintable(errorMessage));
+    QCOMPARE(static_cast<int>(mediaRepository.listForPublication(publicationId).size()), 1);
+
+    QVERIFY2(publicationRepository.remove(publicationId, &errorMessage), qPrintable(errorMessage));
+    QCOMPARE(static_cast<int>(mediaRepository.listForPublication(publicationId).size()), 0);
+
+    QVERIFY2(contentRepository.remove(contentId, &errorMessage), qPrintable(errorMessage));
+    QCOMPARE(static_cast<int>(mediaRepository.listForContent(contentId).size()), 0);
 }
 
 QTEST_MAIN(DatabaseTests)

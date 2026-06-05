@@ -11,12 +11,16 @@ class AppSettings : public QObject
     Q_OBJECT
     Q_PROPERTY(QString configuredDatabasePath READ configuredDatabasePath WRITE setConfiguredDatabasePath NOTIFY configuredDatabasePathChanged)
     Q_PROPERTY(QString defaultDatabasePath READ defaultDatabasePath CONSTANT)
+    Q_PROPERTY(QString configuredMediaDataDir READ configuredMediaDataDir WRITE setConfiguredMediaDataDir NOTIFY configuredMediaDataDirChanged)
+    Q_PROPERTY(QString defaultMediaDataDir READ defaultMediaDataDir CONSTANT)
+    Q_PROPERTY(QString effectiveMediaDataDir READ effectiveMediaDataDir NOTIFY configuredMediaDataDirChanged)
     Q_PROPERTY(int boardDescriptionPreviewWordCap READ boardDescriptionPreviewWordCap WRITE setBoardDescriptionPreviewWordCap NOTIFY boardDescriptionPreviewWordCapChanged)
     Q_PROPERTY(int appLogLevel READ appLogLevel WRITE setAppLogLevel NOTIFY appLogLevelChanged)
     Q_PROPERTY(int fileLogLevel READ fileLogLevel WRITE setFileLogLevel NOTIFY fileLogLevelChanged)
     Q_PROPERTY(QString logFilePath READ logFilePath WRITE setLogFilePath NOTIFY logFilePathChanged)
     Q_PROPERTY(bool pruneLogFile READ pruneLogFile WRITE setPruneLogFile NOTIFY pruneLogFileChanged)
     Q_PROPERTY(bool confirmContentDeletion READ confirmContentDeletion WRITE setConfirmContentDeletion NOTIFY confirmContentDeletionChanged)
+    Q_PROPERTY(bool fetchAddedUrlTitles READ fetchAddedUrlTitles WRITE setFetchAddedUrlTitles NOTIFY fetchAddedUrlTitlesChanged)
 
 public:
     explicit AppSettings(QObject *parent = nullptr);
@@ -26,6 +30,10 @@ public:
 
     [[nodiscard]] QString defaultDatabasePath() const;
     [[nodiscard]] QString effectiveDatabasePath(const QString &overridePath = {}) const;
+    [[nodiscard]] QString configuredMediaDataDir() const;
+    void setConfiguredMediaDataDir(const QString &path);
+    [[nodiscard]] QString defaultMediaDataDir() const;
+    [[nodiscard]] QString effectiveMediaDataDir() const;
 
     [[nodiscard]] int boardDescriptionPreviewWordCap() const;
     void setBoardDescriptionPreviewWordCap(int value);
@@ -45,16 +53,21 @@ public:
     [[nodiscard]] bool confirmContentDeletion() const;
     void setConfirmContentDeletion(bool enabled);
 
+    [[nodiscard]] bool fetchAddedUrlTitles() const;
+    void setFetchAddedUrlTitles(bool enabled);
+
     void ensureDefaults() const;
 
 signals:
     void configuredDatabasePathChanged();
+    void configuredMediaDataDirChanged();
     void boardDescriptionPreviewWordCapChanged();
     void appLogLevelChanged();
     void fileLogLevelChanged();
     void logFilePathChanged();
     void pruneLogFileChanged();
     void confirmContentDeletionChanged();
+    void fetchAddedUrlTitlesChanged();
 
 private:
     void saveValue(const QString &key, const QVariant &value) const;

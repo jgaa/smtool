@@ -5,6 +5,7 @@
 
 #include <QDir>
 #include <QSettings>
+#include <QStandardPaths>
 
 #include <algorithm>
 
@@ -35,6 +36,33 @@ void AppSettings::setConfiguredDatabasePath(const QString &path)
 QString AppSettings::defaultDatabasePath() const
 {
     return Data::Database::defaultDatabasePath();
+}
+
+QString AppSettings::configuredMediaDataDir() const
+{
+    return normalizedPath(QSettings{}.value(QStringLiteral("system/mediaDataDir")).toString());
+}
+
+void AppSettings::setConfiguredMediaDataDir(const QString &path)
+{
+    const auto normalized = normalizedPath(path);
+    if (configuredMediaDataDir() == normalized) {
+        return;
+    }
+
+    saveValue(QStringLiteral("system/mediaDataDir"), normalized);
+    emit configuredMediaDataDirChanged();
+}
+
+QString AppSettings::defaultMediaDataDir() const
+{
+    return normalizedPath(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation));
+}
+
+QString AppSettings::effectiveMediaDataDir() const
+{
+    const auto configured = configuredMediaDataDir();
+    return configured.isEmpty() ? defaultMediaDataDir() : configured;
 }
 
 int AppSettings::boardDescriptionPreviewWordCap() const
@@ -141,6 +169,21 @@ void AppSettings::setConfirmContentDeletion(bool enabled)
     emit confirmContentDeletionChanged();
 }
 
+bool AppSettings::fetchAddedUrlTitles() const
+{
+    return QSettings{}.value(QStringLiteral("ui/fetchAddedUrlTitles"), false).toBool();
+}
+
+void AppSettings::setFetchAddedUrlTitles(bool enabled)
+{
+    if (fetchAddedUrlTitles() == enabled) {
+        return;
+    }
+
+    saveValue(QStringLiteral("ui/fetchAddedUrlTitles"), enabled);
+    emit fetchAddedUrlTitlesChanged();
+}
+
 void AppSettings::ensureDefaults() const
 {
     QSettings settings;
@@ -148,11 +191,17 @@ void AppSettings::ensureDefaults() const
     if (!settings.contains(QStringLiteral("system/databasePath"))) {
         settings.setValue(QStringLiteral("system/databasePath"), QString{});
     }
+    if (!settings.contains(QStringLiteral("system/mediaDataDir"))) {
+        settings.setValue(QStringLiteral("system/mediaDataDir"), QString{});
+    }
     if (!settings.contains(QStringLiteral("ui/boardDescriptionPreviewWordCap"))) {
         settings.setValue(QStringLiteral("ui/boardDescriptionPreviewWordCap"), 10);
     }
     if (!settings.contains(QStringLiteral("ui/confirmContentDeletion"))) {
         settings.setValue(QStringLiteral("ui/confirmContentDeletion"), true);
+    }
+    if (!settings.contains(QStringLiteral("ui/fetchAddedUrlTitles"))) {
+        settings.setValue(QStringLiteral("ui/fetchAddedUrlTitles"), false);
     }
     settings.sync();
 }

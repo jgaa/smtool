@@ -4,6 +4,7 @@
 #include "data/dashboardrepository.h"
 #include "data/database.h"
 #include "data/lookupsrepository.h"
+#include "data/mediarepository.h"
 #include "data/publicationrepository.h"
 #include "data/seriesrepository.h"
 #include "models/calendarentrymodel.h"
@@ -14,6 +15,7 @@
 #include "models/serieslistmodel.h"
 
 #include <QObject>
+#include <QVariantList>
 #include <QVariantMap>
 
 #include <map>
@@ -110,6 +112,11 @@ public:
     Q_INVOKABLE bool createIdeaFromText(const QString &text);
     Q_INVOKABLE bool importIdeasFromUserSelectedFile();
     Q_INVOKABLE bool importIdeasFromFile(const QString &filePath);
+    Q_INVOKABLE QString chooseMediaFile() const;
+    Q_INVOKABLE QString localPathFromUrl(const QString &urlText) const;
+    Q_INVOKABLE bool openMedia(const QVariantMap &mediaItem, const QString &mediaDataDir) const;
+    Q_INVOKABLE QString copyMediaFileToDataDir(const QString &sourcePath, const QString &mediaDataDir);
+    Q_INVOKABLE void logDebug(const QString &message) const;
     Q_INVOKABLE QObject *boardModelForStatus(const QString &statusId) const;
     Q_INVOKABLE QVariantMap contentDetails(const QString &contentId) const;
     Q_INVOKABLE QVariantMap publicationDetails(const QString &publicationId) const;
@@ -121,14 +128,20 @@ public:
                                    int priority,
                                    const QString &scheduledAt,
                                    const QString &suggestedChannelId,
-                                   const QString &status);
+                                   const QString &status,
+                                   const QVariantList &mediaItems,
+                                   const QString &mediaDataDir,
+                                   bool fetchUrlTitles);
     Q_INVOKABLE bool savePublication(const QString &contentId,
                                      const QString &publicationId,
                                      const QString &channelId,
                                      const QString &status,
                                      const QString &scheduledAt,
                                      const QString &publishedAt,
-                                     const QString &url);
+                                     const QString &url,
+                                     const QVariantList &mediaItems,
+                                     const QString &mediaDataDir,
+                                     bool fetchUrlTitles);
     Q_INVOKABLE bool deletePublication(const QString &publicationId);
     Q_INVOKABLE bool deleteContent(const QString &contentId);
     Q_INVOKABLE bool createInboxItem(const QString &title,
@@ -138,7 +151,10 @@ public:
                                      const QString &seriesId,
                                      int priority,
                                      const QString &scheduledAt,
-                                     const QString &suggestedChannelId);
+                                     const QString &suggestedChannelId,
+                                     const QVariantList &mediaItems = {},
+                                     const QString &mediaDataDir = {},
+                                     bool fetchUrlTitles = false);
     Q_INVOKABLE bool moveContentToStatus(const QString &contentId, const QString &targetStatus);
     Q_INVOKABLE bool createSeries(const QString &name, const QString &description, const QString &pillarId);
     Q_INVOKABLE QVariantList burstTemplateOptions() const;
@@ -171,9 +187,22 @@ private:
     void refreshClipboardHasText();
     void setStatusMessage(const QString &message);
     bool createIdeaFromTextInternal(const QString &text, QString *errorMessage = nullptr);
+    [[nodiscard]] QVariantList mediaVariantList(const std::vector<Domain::MediaItem> &items) const;
+    [[nodiscard]] std::vector<Domain::MediaItem> prepareMediaItems(const QVariantList &items,
+                                                                   const QString &mediaDataDir,
+                                                                   bool fetchUrlTitles,
+                                                                   QString *errorMessage) const;
+    [[nodiscard]] QString fetchUrlTitle(const QString &url) const;
+    [[nodiscard]] QString resolveMediaName(const QVariantMap &item,
+                                           const QString &sourceType,
+                                           bool fetchUrlTitles) const;
+    [[nodiscard]] QString copyMediaFile(const QString &sourcePath,
+                                        const QString &mediaDataDir,
+                                        QString *errorMessage) const;
 
     Data::Database database_;
     std::unique_ptr<Data::LookupsRepository> lookupsRepository_;
+    std::unique_ptr<Data::MediaRepository> mediaRepository_;
     std::unique_ptr<Data::PublicationRepository> publicationRepository_;
     std::unique_ptr<Data::SeriesRepository> seriesRepository_;
     std::unique_ptr<Data::ContentRepository> contentRepository_;

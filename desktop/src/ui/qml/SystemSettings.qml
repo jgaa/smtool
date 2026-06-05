@@ -13,8 +13,10 @@ ScrollView {
             return false
         }
         appSettings.configuredDatabasePath = nextPath
+        appSettings.configuredMediaDataDir = mediaDataDirField.text.trim()
         appSettings.boardDescriptionPreviewWordCap = previewWordCapBox.value
         appSettings.confirmContentDeletion = confirmDeleteSwitch.checked
+        appSettings.fetchAddedUrlTitles = fetchUrlTitlesSwitch.checked
         reload()
         return true
     }
@@ -23,8 +25,12 @@ ScrollView {
         databasePathField.text = appSettings.configuredDatabasePath.length > 0
             ? appSettings.configuredDatabasePath
             : appSettings.defaultDatabasePath
+        mediaDataDirField.text = appSettings.configuredMediaDataDir.length > 0
+            ? appSettings.configuredMediaDataDir
+            : appSettings.defaultMediaDataDir
         previewWordCapBox.value = appSettings.boardDescriptionPreviewWordCap
         confirmDeleteSwitch.checked = appSettings.confirmContentDeletion
+        fetchUrlTitlesSwitch.checked = appSettings.fetchAddedUrlTitles
     }
 
     GridLayout {
@@ -65,6 +71,36 @@ ScrollView {
         }
 
         Label {
+            text: qsTr("Media Data Dir")
+        }
+
+        TextField {
+            id: mediaDataDirField
+            Layout.fillWidth: true
+            placeholderText: appSettings.defaultMediaDataDir
+        }
+
+        Item { }
+
+        Label {
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            text: qsTr("Managed media files are stored here. Relative managed media paths are resolved from this directory.")
+            color: palette.mid
+        }
+
+        Label {
+            text: qsTr("Default Media Dir")
+        }
+
+        Label {
+            Layout.fillWidth: true
+            text: appSettings.defaultMediaDataDir
+            wrapMode: Text.WrapAnywhere
+            color: palette.mid
+        }
+
+        Label {
             text: qsTr("Board Preview Words")
         }
 
@@ -82,6 +118,15 @@ ScrollView {
         Switch {
             id: confirmDeleteSwitch
             checked: appSettings.confirmContentDeletion
+        }
+
+        Label {
+            text: qsTr("Fetch URL Titles")
+        }
+
+        Switch {
+            id: fetchUrlTitlesSwitch
+            checked: appSettings.fetchAddedUrlTitles
         }
 
         Item {

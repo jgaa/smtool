@@ -96,6 +96,17 @@ struct Publication {
     QDateTime updatedAt;
 };
 
+struct MediaItem {
+    QString id;
+    QString contentId;
+    QString publicationId;
+    QString name;
+    QString sourceType;
+    QString location;
+    QDateTime createdAt;
+    QDateTime updatedAt;
+};
+
 struct SeriesSummary {
     QString id;
     QString name;

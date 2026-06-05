@@ -3,13 +3,24 @@
 #include "app/loggingcontroller.h"
 
 #include <QClipboard>
+#include <QDesktopServices>
+#include <QDir>
 #include <QDateTime>
+#include <QEventLoop>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QMimeData>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
+#include <QSqlError>
+#include <QSqlQuery>
 #include <QRegularExpression>
+#include <QTimer>
+#include <QUrl>
+#include <QUuid>
 
 #include <algorithm>
 
@@ -107,6 +118,64 @@ bool isMarkdownFilePath(const QString &filePath)
 {
     const auto suffix = QFileInfo{filePath}.suffix().toLower();
     return suffix == "md"_L1 || suffix == "markdown"_L1;
+}
+
+bool isRemoteUrl(const QString &value)
+{
+    const auto url = QUrl{value.trimmed()};
+    return url.isValid() && (url.scheme() == "http"_L1 || url.scheme() == "https"_L1);
+}
+
+QString localFilePathFromUrl(const QString &urlText)
+{
+    const auto url = QUrl{urlText.trimmed()};
+    return url.isLocalFile() ? url.toLocalFile() : QString{};
+}
+
+QString fileNameFromPath(const QString &path)
+{
+    return QFileInfo{path}.fileName().trimmed();
+}
+
+QString htmlTitle(const QString &html)
+{
+    static const QRegularExpression titlePattern(QStringLiteral(R"(<title[^>]*>(.*?)</title>)"),
+                                                 QRegularExpression::CaseInsensitiveOption
+                                                     | QRegularExpression::DotMatchesEverythingOption);
+    auto title = titlePattern.match(html).captured(1);
+    title.replace(QRegularExpression(QStringLiteral(R"(\s+)")), QStringLiteral(" "));
+    return title.trimmed();
+}
+
+bool beginSavepoint(const QSqlDatabase &db, const QString &name, QString *errorMessage)
+{
+    QSqlQuery query{db};
+    if (query.exec(QStringLiteral("SAVEPOINT %1").arg(name))) {
+        return true;
+    }
+    if (errorMessage != nullptr) {
+        *errorMessage = query.lastError().text();
+    }
+    return false;
+}
+
+void rollbackSavepoint(const QSqlDatabase &db, const QString &name)
+{
+    QSqlQuery query{db};
+    query.exec(QStringLiteral("ROLLBACK TO SAVEPOINT %1").arg(name));
+    query.exec(QStringLiteral("RELEASE SAVEPOINT %1").arg(name));
+}
+
+bool releaseSavepoint(const QSqlDatabase &db, const QString &name, QString *errorMessage)
+{
+    QSqlQuery query{db};
+    if (query.exec(QStringLiteral("RELEASE SAVEPOINT %1").arg(name))) {
+        return true;
+    }
+    if (errorMessage != nullptr) {
+        *errorMessage = query.lastError().text();
+    }
+    return false;
 }
 
 QStringList splitIdeasFromMarkdown(const QString &text)
@@ -447,6 +516,58 @@ bool AppController::importIdeasFromFile(const QString &filePath)
     return true;
 }
 
+QString AppController::chooseMediaFile() const
+{
+    return QFileDialog::getOpenFileName(nullptr,
+                                        QStringLiteral("Select Media File"),
+                                        QString{},
+                                        QStringLiteral("All files (*)"));
+}
+
+QString AppController::localPathFromUrl(const QString &urlText) const
+{
+    return localFilePathFromUrl(urlText);
+}
+
+bool AppController::openMedia(const QVariantMap &mediaItem, const QString &mediaDataDir) const
+{
+    const auto sourceType = mediaItem.value(QStringLiteral("sourceType")).toString().trimmed();
+    const auto location = mediaItem.value(QStringLiteral("location")).toString().trimmed();
+    if (sourceType.isEmpty() || location.isEmpty()) {
+        return false;
+    }
+
+    if (sourceType == "url"_L1) {
+        return QDesktopServices::openUrl(QUrl{location});
+    }
+
+    const auto resolvedPath = sourceType == "managed_file"_L1
+        ? QDir{mediaDataDir.trimmed()}.filePath(location)
+        : location;
+    return QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo{resolvedPath}.absoluteFilePath()));
+}
+
+QString AppController::copyMediaFileToDataDir(const QString &sourcePath, const QString &mediaDataDir)
+{
+    QString errorMessage;
+    const auto copiedPath = copyMediaFile(sourcePath, mediaDataDir, &errorMessage);
+    if (copiedPath.isEmpty()) {
+        setStatusMessage(errorMessage.isEmpty() ? QStringLiteral("Could not copy media file.") : errorMessage);
+        LOG_ERROR << "Copy media file failed: " << statusMessage_.toStdString();
+        return {};
+    }
+
+    setStatusMessage(QStringLiteral("Media file copied."));
+    LOG_INFO << "Media file copied from '" << sourcePath.toStdString()
+             << "' to '" << copiedPath.toStdString() << "'";
+    return copiedPath;
+}
+
+void AppController::logDebug(const QString &message) const
+{
+    LOG_DEBUG << message.toStdString();
+}
+
 bool AppController::createIdeaFromTextInternal(const QString &text, QString *errorMessage)
 {
     const auto trimmed = text.trimmed();
@@ -497,6 +618,7 @@ QVariantMap AppController::contentDetails(const QString &contentId) const
         {QStringLiteral("scheduledAt"), item.scheduledAt.isValid() ? item.scheduledAt.toString(Qt::ISODate) : QString{}},
         {QStringLiteral("suggestedChannelId"), item.suggestedChannelId},
         {QStringLiteral("status"), item.status},
+        {QStringLiteral("media"), mediaVariantList(mediaRepository_->listForContent(contentId))},
         {QStringLiteral("publications"), [this, &contentId]() {
             QVariantList publications;
             for (const auto &publication : publicationRepository_->listForContent(contentId)) {
@@ -536,6 +658,7 @@ QVariantMap AppController::publicationDetails(const QString &publicationId) cons
         {QStringLiteral("scheduledAt"), publication.scheduledAt.isValid() ? publication.scheduledAt.toString(Qt::ISODate) : QString{}},
         {QStringLiteral("publishedAt"), publication.publishedAt.isValid() ? publication.publishedAt.toString(Qt::ISODate) : QString{}},
         {QStringLiteral("url"), publication.url},
+        {QStringLiteral("media"), mediaVariantList(mediaRepository_->listForPublication(publicationId))},
     };
 }
 
@@ -547,25 +670,39 @@ bool AppController::updateContent(const QString &contentId,
                                   int priority,
                                   const QString &scheduledAt,
                                   const QString &suggestedChannelId,
-                                  const QString &status)
+                                  const QString &status,
+                                  const QVariantList &mediaItems,
+                                  const QString &mediaDataDir,
+                                  bool fetchUrlTitles)
 {
+    LOG_DEBUG << "updateContent requested for contentId='" << contentId.toStdString()
+              << "' title='" << title.toStdString()
+              << "' status='" << status.toStdString()
+              << "' mediaItems=" << mediaItems.size();
     if (contentId.trimmed().isEmpty()) {
         setStatusMessage(QStringLiteral("Content id is required."));
+        LOG_ERROR << "updateContent failed: content id is required";
         return false;
     }
     if (title.trimmed().isEmpty()) {
         setStatusMessage(QStringLiteral("Title is required."));
+        LOG_ERROR << "updateContent failed for contentId='" << contentId.toStdString()
+                  << "': title is required";
         return false;
     }
 
     const auto existing = contentRepository_->getById(contentId);
     if (existing.id.isEmpty()) {
         setStatusMessage(QStringLiteral("Content not found."));
+        LOG_ERROR << "updateContent failed for contentId='" << contentId.toStdString()
+                  << "': content not found";
         return false;
     }
     const auto scheduled = parseOptionalDateTime(scheduledAt);
     if (!scheduledAt.trimmed().isEmpty() && !scheduled.isValid()) {
         setStatusMessage(QStringLiteral("Invalid scheduled date."));
+        LOG_ERROR << "updateContent failed for contentId='" << contentId.toStdString()
+                  << "': invalid scheduled date '" << scheduledAt.toStdString() << "'";
         return false;
     }
 
@@ -580,13 +717,51 @@ bool AppController::updateContent(const QString &contentId,
     updated.status = status;
 
     QString errorMessage;
-    if (!contentRepository_->update(updated, &errorMessage)) {
+    const auto preparedMedia = prepareMediaItems(mediaItems, mediaDataDir, fetchUrlTitles, &errorMessage);
+    if (!errorMessage.isEmpty()) {
         setStatusMessage(errorMessage);
+        LOG_ERROR << "updateContent failed for contentId='" << contentId.toStdString()
+                  << "' while preparing media: " << errorMessage.toStdString();
+        return false;
+    }
+    LOG_DEBUG << "updateContent prepared " << preparedMedia.size()
+              << " media items for contentId='" << contentId.toStdString() << "'";
+
+    auto db = database_.connection();
+    if (!beginSavepoint(db, QStringLiteral("app_content_update"), &errorMessage)) {
+        setStatusMessage(errorMessage.isEmpty() ? QStringLiteral("Could not start content save.") : errorMessage);
+        LOG_ERROR << "updateContent failed for contentId='" << contentId.toStdString()
+                  << "' starting savepoint: " << errorMessage.toStdString();
+        return false;
+    }
+    LOG_DEBUG << "updateContent savepoint started for contentId='" << contentId.toStdString() << "'";
+    if (!contentRepository_->update(updated, &errorMessage)) {
+        rollbackSavepoint(db, QStringLiteral("app_content_update"));
+        setStatusMessage(errorMessage);
+        LOG_ERROR << "updateContent failed for contentId='" << contentId.toStdString()
+                  << "' in contentRepository_->update: " << errorMessage.toStdString();
+        return false;
+    }
+    LOG_DEBUG << "updateContent repository update succeeded for contentId='" << contentId.toStdString() << "'";
+    if (!mediaRepository_->replaceForContent(contentId, preparedMedia, &errorMessage)) {
+        rollbackSavepoint(db, QStringLiteral("app_content_update"));
+        setStatusMessage(errorMessage);
+        LOG_ERROR << "updateContent failed for contentId='" << contentId.toStdString()
+                  << "' in mediaRepository_->replaceForContent: " << errorMessage.toStdString();
+        return false;
+    }
+    LOG_DEBUG << "updateContent media replace succeeded for contentId='" << contentId.toStdString() << "'";
+    if (!releaseSavepoint(db, QStringLiteral("app_content_update"), &errorMessage)) {
+        rollbackSavepoint(db, QStringLiteral("app_content_update"));
+        setStatusMessage(errorMessage.isEmpty() ? QStringLiteral("Could not save content media.") : errorMessage);
+        LOG_ERROR << "updateContent failed for contentId='" << contentId.toStdString()
+                  << "' releasing savepoint: " << errorMessage.toStdString();
         return false;
     }
 
     refreshAll();
     setStatusMessage(QStringLiteral("Content updated."));
+    LOG_DEBUG << "updateContent completed for contentId='" << contentId.toStdString() << "'";
     return true;
 }
 
@@ -596,7 +771,10 @@ bool AppController::savePublication(const QString &contentId,
                                     const QString &status,
                                     const QString &scheduledAt,
                                     const QString &publishedAt,
-                                    const QString &url)
+                                    const QString &url,
+                                    const QVariantList &mediaItems,
+                                    const QString &mediaDataDir,
+                                    bool fetchUrlTitles)
 {
     if (contentId.trimmed().isEmpty()) {
         setStatusMessage(QStringLiteral("Content id is required."));
@@ -630,11 +808,34 @@ bool AppController::savePublication(const QString &contentId,
     };
 
     QString errorMessage;
-    const bool ok = publication.id.isEmpty()
-        ? !publicationRepository_->create(publication, &errorMessage).isEmpty()
-        : publicationRepository_->update(publication, &errorMessage);
-    if (!ok) {
+    const auto preparedMedia = prepareMediaItems(mediaItems, mediaDataDir, fetchUrlTitles, &errorMessage);
+    if (!errorMessage.isEmpty()) {
         setStatusMessage(errorMessage);
+        return false;
+    }
+
+    auto db = database_.connection();
+    if (!beginSavepoint(db, QStringLiteral("app_publication_save"), &errorMessage)) {
+        setStatusMessage(errorMessage.isEmpty() ? QStringLiteral("Could not start publication save.") : errorMessage);
+        return false;
+    }
+
+    const auto resolvedPublicationId = publication.id.isEmpty()
+        ? publicationRepository_->create(publication, &errorMessage)
+        : (publicationRepository_->update(publication, &errorMessage) ? publication.id : QString{});
+    if (resolvedPublicationId.isEmpty()) {
+        rollbackSavepoint(db, QStringLiteral("app_publication_save"));
+        setStatusMessage(errorMessage);
+        return false;
+    }
+    if (!mediaRepository_->replaceForPublication(resolvedPublicationId, preparedMedia, &errorMessage)) {
+        rollbackSavepoint(db, QStringLiteral("app_publication_save"));
+        setStatusMessage(errorMessage);
+        return false;
+    }
+    if (!releaseSavepoint(db, QStringLiteral("app_publication_save"), &errorMessage)) {
+        rollbackSavepoint(db, QStringLiteral("app_publication_save"));
+        setStatusMessage(errorMessage.isEmpty() ? QStringLiteral("Could not save publication media.") : errorMessage);
         return false;
     }
 
@@ -691,15 +892,22 @@ bool AppController::createInboxItem(const QString &title,
                                     const QString &seriesId,
                                     int priority,
                                     const QString &scheduledAt,
-                                    const QString &suggestedChannelId)
+                                    const QString &suggestedChannelId,
+                                    const QVariantList &mediaItems,
+                                    const QString &mediaDataDir,
+                                    bool fetchUrlTitles)
 {
+    LOG_DEBUG << "createInboxItem requested title='" << title.toStdString()
+              << "' mediaItems=" << mediaItems.size();
     if (title.trimmed().isEmpty()) {
         setStatusMessage(QStringLiteral("Title is required."));
+        LOG_ERROR << "createInboxItem failed: title is required";
         return false;
     }
     const auto scheduled = parseOptionalDateTime(scheduledAt);
     if (!scheduledAt.trimmed().isEmpty() && !scheduled.isValid()) {
         setStatusMessage(QStringLiteral("Invalid scheduled date."));
+        LOG_ERROR << "createInboxItem failed: invalid scheduled date '" << scheduledAt.toStdString() << "'";
         return false;
     }
 
@@ -707,6 +915,7 @@ bool AppController::createInboxItem(const QString &title,
     const auto ideaKindId = lookupsRepository_->lookupIdByKey(QStringLiteral("content_kind"), QStringLiteral("idea"));
     if (ideaKindId.isEmpty()) {
         setStatusMessage(QStringLiteral("Missing seeded content kind 'idea'."));
+        LOG_ERROR << "createInboxItem failed: missing seeded content kind 'idea'";
         return false;
     }
 
@@ -725,13 +934,46 @@ bool AppController::createInboxItem(const QString &title,
     };
     content.seriesId = seriesId;
 
-    if (contentRepository_->create(content, &errorMessage).isEmpty()) {
+    const auto preparedMedia = prepareMediaItems(mediaItems, mediaDataDir, fetchUrlTitles, &errorMessage);
+    if (!errorMessage.isEmpty()) {
         setStatusMessage(errorMessage);
+        LOG_ERROR << "createInboxItem failed while preparing media: " << errorMessage.toStdString();
+        return false;
+    }
+    LOG_DEBUG << "createInboxItem prepared " << preparedMedia.size() << " media items";
+
+    auto db = database_.connection();
+    if (!beginSavepoint(db, QStringLiteral("app_content_create"), &errorMessage)) {
+        setStatusMessage(errorMessage.isEmpty() ? QStringLiteral("Could not start content save.") : errorMessage);
+        LOG_ERROR << "createInboxItem failed starting savepoint: " << errorMessage.toStdString();
+        return false;
+    }
+
+    const auto contentId = contentRepository_->create(content, &errorMessage);
+    if (contentId.isEmpty()) {
+        rollbackSavepoint(db, QStringLiteral("app_content_create"));
+        setStatusMessage(errorMessage);
+        LOG_ERROR << "createInboxItem failed in contentRepository_->create: " << errorMessage.toStdString();
+        return false;
+    }
+    LOG_DEBUG << "createInboxItem repository create succeeded with contentId='" << contentId.toStdString() << "'";
+    if (!mediaRepository_->replaceForContent(contentId, preparedMedia, &errorMessage)) {
+        rollbackSavepoint(db, QStringLiteral("app_content_create"));
+        setStatusMessage(errorMessage);
+        LOG_ERROR << "createInboxItem failed in mediaRepository_->replaceForContent: " << errorMessage.toStdString();
+        return false;
+    }
+    LOG_DEBUG << "createInboxItem media replace succeeded for contentId='" << contentId.toStdString() << "'";
+    if (!releaseSavepoint(db, QStringLiteral("app_content_create"), &errorMessage)) {
+        rollbackSavepoint(db, QStringLiteral("app_content_create"));
+        setStatusMessage(errorMessage.isEmpty() ? QStringLiteral("Could not save content media.") : errorMessage);
+        LOG_ERROR << "createInboxItem failed releasing savepoint: " << errorMessage.toStdString();
         return false;
     }
 
     refreshAll();
     setStatusMessage(QStringLiteral("Inbox item created."));
+    LOG_DEBUG << "createInboxItem completed with contentId='" << contentId.toStdString() << "'";
     return true;
 }
 
@@ -810,10 +1052,184 @@ bool AppController::createBurstForCurrentSource(const QVariantList &templateKeys
     return true;
 }
 
+QVariantList AppController::mediaVariantList(const std::vector<Domain::MediaItem> &items) const
+{
+    QVariantList result;
+    result.reserve(static_cast<qsizetype>(items.size()));
+    for (const auto &item : items) {
+        result.push_back(QVariantMap{
+            {QStringLiteral("id"), item.id},
+            {QStringLiteral("contentId"), item.contentId},
+            {QStringLiteral("publicationId"), item.publicationId},
+            {QStringLiteral("name"), item.name},
+            {QStringLiteral("sourceType"), item.sourceType},
+            {QStringLiteral("location"), item.location},
+        });
+    }
+    return result;
+}
+
+std::vector<Domain::MediaItem> AppController::prepareMediaItems(const QVariantList &items,
+                                                                const QString &mediaDataDir,
+                                                                bool fetchUrlTitles,
+                                                                QString *errorMessage) const
+{
+    LOG_DEBUG << "prepareMediaItems called with items=" << items.size()
+              << " mediaDataDir='" << mediaDataDir.toStdString()
+              << "' fetchUrlTitles=" << (fetchUrlTitles ? "true" : "false");
+    std::vector<Domain::MediaItem> prepared;
+    prepared.reserve(static_cast<std::size_t>(items.size()));
+
+    for (const auto &value : items) {
+        const auto item = value.toMap();
+        auto location = item.value(QStringLiteral("location")).toString().trimmed();
+        if (location.isEmpty()) {
+            LOG_DEBUG << "prepareMediaItems skipping empty location item";
+            continue;
+        }
+
+        auto sourceType = item.value(QStringLiteral("sourceType")).toString().trimmed();
+        const auto copyFile = item.value(QStringLiteral("copyFile")).toBool();
+        if (isRemoteUrl(location)) {
+            sourceType = QStringLiteral("url");
+        } else if (copyFile) {
+            sourceType = QStringLiteral("managed_file");
+        } else if (sourceType.isEmpty()) {
+            sourceType = QFileInfo{location}.isAbsolute() ? QStringLiteral("file") : QStringLiteral("managed_file");
+        }
+
+        if (sourceType == "managed_file"_L1 && QFileInfo{location}.isAbsolute()) {
+            location = copyMediaFile(location, mediaDataDir, errorMessage);
+            if (location.isEmpty()) {
+                LOG_ERROR << "prepareMediaItems failed copying managed file from '"
+                          << item.value(QStringLiteral("location")).toString().toStdString()
+                          << "': " << (errorMessage != nullptr ? errorMessage->toStdString() : std::string{});
+                return {};
+            }
+        } else if (sourceType != "url"_L1) {
+            location = QDir::cleanPath(location);
+        }
+
+        const auto name = resolveMediaName(item, sourceType, fetchUrlTitles);
+        LOG_DEBUG << "prepareMediaItems item resolved name='" << name.toStdString()
+                  << "' sourceType='" << sourceType.toStdString()
+                  << "' location='" << location.toStdString() << "'";
+        prepared.push_back({
+            .id = item.value(QStringLiteral("id")).toString().trimmed(),
+            .name = name,
+            .sourceType = sourceType,
+            .location = location,
+        });
+    }
+
+    LOG_DEBUG << "prepareMediaItems completed with prepared items=" << prepared.size();
+    return prepared;
+}
+
+QString AppController::fetchUrlTitle(const QString &url) const
+{
+    QNetworkAccessManager manager;
+    QNetworkRequest request{QUrl{url}};
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
+    auto *reply = manager.get(request);
+
+    QEventLoop loop;
+    QTimer timeout;
+    timeout.setSingleShot(true);
+    QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    QObject::connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
+    timeout.start(5000);
+    loop.exec();
+
+    const auto timedOut = timeout.isActive() == false && reply->isFinished() == false;
+    if (timedOut) {
+        reply->abort();
+    }
+
+    const auto title = (!timedOut && reply->error() == QNetworkReply::NoError)
+        ? htmlTitle(QString::fromUtf8(reply->readAll()))
+        : QString{};
+    reply->deleteLater();
+    return title;
+}
+
+QString AppController::resolveMediaName(const QVariantMap &item,
+                                        const QString &sourceType,
+                                        bool fetchUrlTitles) const
+{
+    const auto explicitName = item.value(QStringLiteral("name")).toString().trimmed();
+    const auto hasReusableExplicitName = !explicitName.isEmpty()
+        && !(sourceType == "url"_L1 && explicitName.compare(QStringLiteral("Unnamed"), Qt::CaseInsensitive) == 0);
+    if (hasReusableExplicitName) {
+        return explicitName;
+    }
+
+    const auto location = item.value(QStringLiteral("location")).toString().trimmed();
+    if (sourceType == "url"_L1) {
+        if (fetchUrlTitles) {
+            LOG_DEBUG << "resolveMediaName fetching title for url '" << location.toStdString() << "'";
+            const auto title = fetchUrlTitle(location);
+            if (!title.isEmpty()) {
+                LOG_DEBUG << "resolveMediaName fetched title '" << title.toStdString()
+                          << "' for url '" << location.toStdString() << "'";
+                return title;
+            }
+            LOG_DEBUG << "resolveMediaName did not get a title for url '" << location.toStdString() << "'";
+        }
+        return QStringLiteral("Unnamed");
+    }
+
+    const auto fileName = fileNameFromPath(location);
+    return fileName.isEmpty() ? QStringLiteral("Unnamed") : fileName;
+}
+
+QString AppController::copyMediaFile(const QString &sourcePath,
+                                     const QString &mediaDataDir,
+                                     QString *errorMessage) const
+{
+    const auto absoluteSourcePath = QFileInfo{sourcePath}.absoluteFilePath();
+    const auto baseDir = mediaDataDir.trimmed();
+    if (baseDir.isEmpty()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("Media data directory is not configured.");
+        }
+        return {};
+    }
+
+    QDir dir{baseDir};
+    if (!dir.mkpath(QStringLiteral("media"))) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("Could not create media storage directory.");
+        }
+        return {};
+    }
+
+    const auto sourceInfo = QFileInfo{absoluteSourcePath};
+    if (!sourceInfo.exists() || !sourceInfo.isFile()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("Media file does not exist.");
+        }
+        return {};
+    }
+
+    const auto relativeTargetPath = QDir{QStringLiteral("media")}.filePath(
+        QUuid::createUuid().toString(QUuid::WithoutBraces) + QStringLiteral("_") + sourceInfo.fileName());
+    const auto absoluteTargetPath = dir.filePath(relativeTargetPath);
+    if (!QFile::copy(absoluteSourcePath, absoluteTargetPath)) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("Could not copy media file.");
+        }
+        return {};
+    }
+
+    return relativeTargetPath;
+}
+
 void AppController::initializeRepositories()
 {
     auto db = database_.connection();
     lookupsRepository_ = std::make_unique<Data::LookupsRepository>(db);
+    mediaRepository_ = std::make_unique<Data::MediaRepository>(db);
     publicationRepository_ = std::make_unique<Data::PublicationRepository>(db);
     seriesRepository_ = std::make_unique<Data::SeriesRepository>(db);
     contentRepository_ = std::make_unique<Data::ContentRepository>(db);
@@ -826,6 +1242,7 @@ void AppController::resetRepositories()
     contentRepository_.reset();
     seriesRepository_.reset();
     publicationRepository_.reset();
+    mediaRepository_.reset();
     lookupsRepository_.reset();
 }
 

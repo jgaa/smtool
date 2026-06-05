@@ -316,6 +316,7 @@ ApplicationWindow {
         closePolicy: Popup.NoAutoClose
         property string editingContentId: ""
         property var publicationsModel: []
+        property var mediaItems: []
         title: editingContentId.length > 0 ? qsTr("Edit Content") : qsTr("Quick Add")
         width: Math.min(window.width - 40, 900)
         height: Math.min(window.height - 40, 860)
@@ -323,6 +324,8 @@ ApplicationWindow {
         function resetForm() {
             editingContentId = ""
             publicationsModel = []
+            mediaItems = []
+            contentMediaEditor.replaceItems(mediaItems)
             inboxTitleField.clear()
             inboxDescriptionField.clear()
             inboxTagsField.clear()
@@ -346,6 +349,8 @@ ApplicationWindow {
             }
             const item = appController.contentDetails(editingContentId)
             publicationsModel = item.publications ? item.publications : []
+            mediaItems = item.media ? item.media : []
+            contentMediaEditor.replaceItems(mediaItems)
         }
 
         function openForCreate() {
@@ -386,6 +391,8 @@ ApplicationWindow {
             }
 
             publicationsModel = item.publications ? item.publications : []
+            mediaItems = item.media ? item.media : []
+            contentMediaEditor.replaceItems(mediaItems)
 
             open()
         }
@@ -514,96 +521,127 @@ ApplicationWindow {
                             TextArea {
                                 id: inboxDescriptionField
                                 Layout.fillWidth: true
-                                Layout.fillHeight: true
+                                Layout.preferredHeight: 220
                                 wrapMode: TextEdit.Wrap
                                 placeholderText: "Optional note"
                             }
 
-                            ColumnLayout {
+                            MediaAttachmentsEditor {
+                                id: contentMediaEditor
                                 Layout.fillWidth: true
-                                spacing: 8
+                                mediaDataDir: appSettings.effectiveMediaDataDir
+                                onItemsChanged: quickAddDialog.mediaItems = items
+                            }
+
+                            Frame {
+                                Layout.fillWidth: true
                                 visible: quickAddDialog.editingContentId.length > 0
 
-                                RowLayout {
-                                    Layout.fillWidth: true
+                                ColumnLayout {
+                                    anchors.fill: parent
+                                    spacing: 8
 
-                                    Label {
-                                        text: "Publishing"
-                                        font.bold: true
-                                    }
-
-                                    Item { Layout.fillWidth: true }
-
-                                    Button {
-                                        text: "Add Publication"
-                                        onClicked: publicationDialog.openForCreate(quickAddDialog.editingContentId)
-                                    }
-                                }
-
-                                Repeater {
-                                    model: quickAddDialog.publicationsModel
-
-                                    delegate: Rectangle {
-                                        required property var modelData
+                                    RowLayout {
                                         Layout.fillWidth: true
-                                        implicitHeight: publicationLayout.implicitHeight + 12
-                                        radius: 6
-                                        color: "#ffffff"
-                                        border.color: "#d6d6d6"
 
-                                        RowLayout {
-                                            id: publicationLayout
-                                            anchors.fill: parent
-                                            anchors.margins: 6
-                                            spacing: 8
+                                        Label {
+                                            text: "Publishing"
+                                            font.bold: true
+                                        }
 
-                                            ColumnLayout {
-                                                Layout.fillWidth: true
+                                        Item { Layout.fillWidth: true }
 
-                                                Label {
-                                                    text: [modelData.channelName, modelData.status].filter(function(v) { return v.length > 0 }).join(" | ")
-                                                    font.bold: true
-                                                    Layout.fillWidth: true
-                                                }
+                                        Button {
+                                            text: "Add Publication"
+                                            onClicked: publicationDialog.openForCreate(quickAddDialog.editingContentId)
+                                        }
+                                    }
 
-                                                Label {
-                                                    text: [
-                                                        modelData.scheduledAt.length > 0 ? "Scheduled " + modelData.scheduledAt : "",
-                                                        modelData.publishedAt.length > 0 ? "Published " + modelData.publishedAt : ""
-                                                    ].filter(function(v) { return v.length > 0 }).join(" | ")
-                                                    visible: text.length > 0
-                                                    color: "#555555"
-                                                    Layout.fillWidth: true
-                                                    wrapMode: Text.Wrap
-                                                }
+                                    ListView {
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: Math.max(80, Math.min(contentHeight, 240))
+                                        clip: true
+                                        model: quickAddDialog.publicationsModel
+                                        spacing: 8
 
-                                                Label {
-                                                    text: modelData.url
-                                                    visible: text.length > 0
-                                                    color: "#555555"
-                                                    Layout.fillWidth: true
-                                                    wrapMode: Text.WrapAnywhere
-                                                }
+                                        ScrollBar.vertical: ScrollBar {
+                                            policy: ScrollBar.AsNeeded
+                                            width: 18
+
+                                            contentItem: Rectangle {
+                                                implicitWidth: 18
+                                                radius: 9
+                                                color: parent.pressed ? "#8f8f8f" : "#a7a7a7"
                                             }
 
-                                            ToolButton {
-                                                icon.name: "document-edit"
-                                                text: "Edit publication"
-                                                display: AbstractButton.IconOnly
-                                                ToolTip.visible: hovered
-                                                ToolTip.text: text
-                                                onClicked: publicationDialog.openForEdit(modelData.id)
+                                            background: Rectangle {
+                                                radius: 9
+                                                color: "#ececec"
                                             }
+                                        }
 
-                                            ToolButton {
-                                                icon.name: "edit-delete"
-                                                text: "Delete publication"
-                                                display: AbstractButton.IconOnly
-                                                ToolTip.visible: hovered
-                                                ToolTip.text: text
-                                                onClicked: {
-                                                    if (appController.deletePublication(modelData.id)) {
-                                                        quickAddDialog.reloadPublications()
+                                        delegate: Rectangle {
+                                            required property var modelData
+                                            width: ListView.view.width
+                                            implicitHeight: publicationLayout.implicitHeight + 12
+                                            radius: 6
+                                            color: "#ffffff"
+                                            border.color: "#d6d6d6"
+
+                                            RowLayout {
+                                                id: publicationLayout
+                                                anchors.fill: parent
+                                                anchors.margins: 6
+                                                spacing: 8
+
+                                                ColumnLayout {
+                                                    Layout.fillWidth: true
+
+                                                    Label {
+                                                        text: [modelData.channelName, modelData.status].filter(function(v) { return v.length > 0 }).join(" | ")
+                                                        font.bold: true
+                                                        Layout.fillWidth: true
+                                                    }
+
+                                                    Label {
+                                                        text: [
+                                                            modelData.scheduledAt.length > 0 ? "Scheduled " + modelData.scheduledAt : "",
+                                                            modelData.publishedAt.length > 0 ? "Published " + modelData.publishedAt : ""
+                                                        ].filter(function(v) { return v.length > 0 }).join(" | ")
+                                                        visible: text.length > 0
+                                                        color: "#555555"
+                                                        Layout.fillWidth: true
+                                                        wrapMode: Text.Wrap
+                                                    }
+
+                                                    Label {
+                                                        text: modelData.url
+                                                        visible: text.length > 0
+                                                        color: "#555555"
+                                                        Layout.fillWidth: true
+                                                        wrapMode: Text.WrapAnywhere
+                                                    }
+                                                }
+
+                                                ToolButton {
+                                                    icon.name: "document-edit"
+                                                    text: "Edit publication"
+                                                    display: AbstractButton.IconOnly
+                                                    ToolTip.visible: hovered
+                                                    ToolTip.text: text
+                                                    onClicked: publicationDialog.openForEdit(modelData.id)
+                                                }
+
+                                                ToolButton {
+                                                    icon.name: "edit-delete"
+                                                    text: "Delete publication"
+                                                    display: AbstractButton.IconOnly
+                                                    ToolTip.visible: hovered
+                                                    ToolTip.text: text
+                                                    onClicked: {
+                                                        if (appController.deletePublication(modelData.id)) {
+                                                            quickAddDialog.reloadPublications()
+                                                        }
                                                     }
                                                 }
                                             }
@@ -633,7 +671,10 @@ ApplicationWindow {
                                                       priorityBox.value,
                                                       scheduledAtSelector.value,
                                                       channelId,
-                                                      status)
+                                                      status,
+                                                      quickAddDialog.mediaItems,
+                                                      appSettings.effectiveMediaDataDir,
+                                                      appSettings.fetchAddedUrlTitles)
                         : appController.createInboxItem(inboxTitleField.text,
                                                         inboxDescriptionField.text,
                                                         inboxTagsField.text,
@@ -641,7 +682,10 @@ ApplicationWindow {
                                                         "",
                                                         priorityBox.value,
                                                         scheduledAtSelector.value,
-                                                        channelId)
+                                                        channelId,
+                                                        quickAddDialog.mediaItems,
+                                                        appSettings.effectiveMediaDataDir,
+                                                        appSettings.fetchAddedUrlTitles)
                     if (ok) {
                         quickAddDialog.resetForm()
                         quickAddDialog.close()
@@ -665,12 +709,16 @@ ApplicationWindow {
         closePolicy: Popup.NoAutoClose
         property string contentId: ""
         property string editingPublicationId: ""
+        property var mediaItems: []
         title: editingPublicationId.length > 0 ? qsTr("Edit Publication") : qsTr("Add Publication")
-        width: Math.min(window.width - 80, 560)
+        width: Math.min(window.width - 80, 760)
+        height: Math.min(window.height - 40, 760)
 
         function resetForm() {
             contentId = ""
             editingPublicationId = ""
+            mediaItems = []
+            publicationMediaEditor.replaceItems(mediaItems)
             if (publicationChannelBox.count > 0) {
                 publicationChannelBox.currentIndex = 0
             }
@@ -717,6 +765,8 @@ ApplicationWindow {
                 ? publication.publishedAt.slice(0, 10)
                 : ""
             publicationUrlField.text = publication.url
+            mediaItems = publication.media ? publication.media : []
+            publicationMediaEditor.replaceItems(mediaItems)
             open()
         }
 
@@ -725,45 +775,64 @@ ApplicationWindow {
             anchors.margins: 20
             spacing: 16
 
-            GridLayout {
-                columns: 2
-                columnSpacing: 12
-                rowSpacing: 12
+            ScrollView {
                 Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                contentWidth: availableWidth
 
-                Label { text: "Channel" }
-                ComboBox {
-                    id: publicationChannelBox
-                    Layout.fillWidth: true
-                    model: appController.channelModel
-                    textRole: "displayName"
-                    valueRole: "lookupId"
-                }
+                ColumnLayout {
+                    width: parent.width
+                    spacing: 16
 
-                Label { text: "Status" }
-                ComboBox {
-                    id: publicationStatusBox
-                    Layout.fillWidth: true
-                    model: window.publicationStatuses
-                }
+                    GridLayout {
+                        columns: 2
+                        columnSpacing: 12
+                        rowSpacing: 12
+                        Layout.fillWidth: true
 
-                Label { text: "Scheduled At" }
-                DateSelector {
-                    id: publicationScheduledAtSelector
-                    Layout.fillWidth: true
-                }
+                        Label { text: "Channel" }
+                        ComboBox {
+                            id: publicationChannelBox
+                            Layout.fillWidth: true
+                            model: appController.channelModel
+                            textRole: "displayName"
+                            valueRole: "lookupId"
+                        }
 
-                Label { text: "Published At" }
-                DateSelector {
-                    id: publicationPublishedAtSelector
-                    Layout.fillWidth: true
-                }
+                        Label { text: "Status" }
+                        ComboBox {
+                            id: publicationStatusBox
+                            Layout.fillWidth: true
+                            model: window.publicationStatuses
+                        }
 
-                Label { text: "URL" }
-                TextField {
-                    id: publicationUrlField
-                    Layout.fillWidth: true
-                    placeholderText: "https://..."
+                        Label { text: "Scheduled At" }
+                        DateSelector {
+                            id: publicationScheduledAtSelector
+                            Layout.fillWidth: true
+                        }
+
+                        Label { text: "Published At" }
+                        DateSelector {
+                            id: publicationPublishedAtSelector
+                            Layout.fillWidth: true
+                        }
+
+                        Label { text: "URL" }
+                        TextField {
+                            id: publicationUrlField
+                            Layout.fillWidth: true
+                            placeholderText: "https://..."
+                        }
+                    }
+
+                    MediaAttachmentsEditor {
+                        id: publicationMediaEditor
+                        Layout.fillWidth: true
+                        mediaDataDir: appSettings.effectiveMediaDataDir
+                        onItemsChanged: publicationDialog.mediaItems = items
+                    }
                 }
             }
 
@@ -780,7 +849,10 @@ ApplicationWindow {
                                                       status,
                                                       publicationScheduledAtSelector.value,
                                                       publicationPublishedAtSelector.value,
-                                                      publicationUrlField.text)) {
+                                                      publicationUrlField.text,
+                                                      publicationDialog.mediaItems,
+                                                      appSettings.effectiveMediaDataDir,
+                                                      appSettings.fetchAddedUrlTitles)) {
                         quickAddDialog.reloadPublications()
                         publicationDialog.resetForm()
                         publicationDialog.close()
