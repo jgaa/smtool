@@ -4,6 +4,9 @@
 
 #include <QClipboard>
 #include <QDateTime>
+#include <QFile>
+#include <QFileDialog>
+#include <QFileInfo>
 #include <QGuiApplication>
 #include <QMimeData>
 #include <QRegularExpression>
@@ -100,6 +103,25 @@ QString ideaTitleFromText(const QString &text)
     return clipToWords(firstSentence(trimmed), 5);
 }
 
+bool isMarkdownFilePath(const QString &filePath)
+{
+    const auto suffix = QFileInfo{filePath}.suffix().toLower();
+    return suffix == "md"_L1 || suffix == "markdown"_L1;
+}
+
+QStringList splitIdeasFromMarkdown(const QString &text)
+{
+    const auto sections = text.split(QRegularExpression(QStringLiteral(R"((?:\r?\n)\s*---\s*(?:\r?\n))")));
+    QStringList ideas;
+    for (const auto &section : sections) {
+        const auto trimmed = section.trimmed();
+        if (!trimmed.isEmpty()) {
+            ideas.append(trimmed);
+        }
+    }
+    return ideas;
+}
+
 QDateTime parseOptionalDateTime(const QString &value)
 {
     const auto trimmed = value.trimmed();
@@ -154,30 +176,18 @@ bool AppController::initialize(QString *errorMessage)
 
 void AppController::setDescriptionPreviewWordCap(int value)
 {
+    descriptionPreviewWordCap_ = value;
     inboxModel_.setDescriptionPreviewWordCap(value);
-    boardInboxModel_.setDescriptionPreviewWordCap(value);
-    boardClarifyingModel_.setDescriptionPreviewWordCap(value);
-    boardShapingModel_.setDescriptionPreviewWordCap(value);
-    boardDraftingModel_.setDescriptionPreviewWordCap(value);
-    boardReadyModel_.setDescriptionPreviewWordCap(value);
-    boardScheduledModel_.setDescriptionPreviewWordCap(value);
-    boardPublishedModel_.setDescriptionPreviewWordCap(value);
-    boardReviewingModel_.setDescriptionPreviewWordCap(value);
-    boardArchivedModel_.setDescriptionPreviewWordCap(value);
+    for (auto &[statusId, model] : boardModels_) {
+        Q_UNUSED(statusId);
+        model->setDescriptionPreviewWordCap(value);
+    }
     sourceModel_.setDescriptionPreviewWordCap(value);
     derivativeModel_.setDescriptionPreviewWordCap(value);
 }
 
 Models::ContentListModel *AppController::inboxModel() { return &inboxModel_; }
-Models::ContentListModel *AppController::boardInboxModel() { return &boardInboxModel_; }
-Models::ContentListModel *AppController::boardClarifyingModel() { return &boardClarifyingModel_; }
-Models::ContentListModel *AppController::boardShapingModel() { return &boardShapingModel_; }
-Models::ContentListModel *AppController::boardDraftingModel() { return &boardDraftingModel_; }
-Models::ContentListModel *AppController::boardReadyModel() { return &boardReadyModel_; }
-Models::ContentListModel *AppController::boardScheduledModel() { return &boardScheduledModel_; }
-Models::ContentListModel *AppController::boardPublishedModel() { return &boardPublishedModel_; }
-Models::ContentListModel *AppController::boardReviewingModel() { return &boardReviewingModel_; }
-Models::ContentListModel *AppController::boardArchivedModel() { return &boardArchivedModel_; }
+Models::ContentStatusListModel *AppController::contentStatusModel() { return &contentStatusModel_; }
 Models::CalendarEntryModel *AppController::calendarModel() { return &calendarModel_; }
 Models::ContentListModel *AppController::sourceModel() { return &sourceModel_; }
 Models::ContentListModel *AppController::derivativeModel() { return &derivativeModel_; }
@@ -270,6 +280,12 @@ bool AppController::refreshAll()
     return true;
 }
 
+QObject *AppController::boardModelForStatus(const QString &statusId) const
+{
+    const auto it = boardModels_.find(statusId);
+    return it != boardModels_.end() ? it->second.get() : nullptr;
+}
+
 bool AppController::applyDatabasePath(const QString &path)
 {
     QString errorMessage;
@@ -301,36 +317,117 @@ bool AppController::pasteClipboardToIdea()
     const auto *clipboard = QGuiApplication::clipboard();
     if (clipboard == nullptr) {
         setStatusMessage(QStringLiteral("Clipboard is not available."));
+        LOG_ERROR << "Clipboard import failed: clipboard is not available";
         return false;
     }
 
-    return createIdeaFromText(clipboard->text());
+    const auto imported = createIdeaFromText(clipboard->text());
+    if (imported) {
+        LOG_INFO << "1 idea was imported from clipboard";
+    } else {
+        LOG_ERROR << "Clipboard import failed: " << statusMessage_.toStdString();
+    }
+    return imported;
 }
 
 bool AppController::createIdeaFromText(const QString &text)
 {
+    QString errorMessage;
+    const auto created = createIdeaFromTextInternal(text, &errorMessage);
+    setStatusMessage(created ? QStringLiteral("Inbox item created.") : errorMessage);
+    return created;
+}
+
+bool AppController::importIdeasFromUserSelectedFile()
+{
+    const auto selectedPath = QFileDialog::getOpenFileName(nullptr,
+                                                           QStringLiteral("Import Ideas"),
+                                                           QString{},
+                                                           QStringLiteral("Text and Markdown files (*.txt *.md *.markdown);;All files (*)"));
+    if (selectedPath.isEmpty()) {
+        return false;
+    }
+
+    return importIdeasFromFile(selectedPath);
+}
+
+bool AppController::importIdeasFromFile(const QString &filePath)
+{
+    const auto trimmedPath = filePath.trimmed();
+    if (trimmedPath.isEmpty()) {
+        setStatusMessage(QStringLiteral("No import file selected."));
+        LOG_ERROR << "File import failed: no file path was selected";
+        return false;
+    }
+
+    QFile file{trimmedPath};
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        setStatusMessage(QStringLiteral("Could not open import file."));
+        LOG_ERROR << "File import failed for '" << trimmedPath.toStdString()
+                  << "': " << file.errorString().toStdString();
+        return false;
+    }
+
+    const auto content = QString::fromUtf8(file.readAll());
+    const auto ideas = isMarkdownFilePath(trimmedPath) ? splitIdeasFromMarkdown(content)
+                                                       : QStringList{content.trimmed()};
+
+    int importedCount = 0;
+    for (const auto &idea : ideas) {
+        QString errorMessage;
+        if (!createIdeaFromTextInternal(idea, &errorMessage)) {
+            setStatusMessage(errorMessage);
+            LOG_ERROR << "File import failed for '" << trimmedPath.toStdString()
+                      << "': " << errorMessage.toStdString();
+            return false;
+        }
+        ++importedCount;
+    }
+
+    if (importedCount == 0) {
+        setStatusMessage(QStringLiteral("Import file did not contain any ideas."));
+        LOG_ERROR << "File import failed for '" << trimmedPath.toStdString()
+                  << "': import file did not contain any ideas";
+        return false;
+    }
+
+    setStatusMessage(importedCount == 1
+                         ? QStringLiteral("Imported 1 idea from file.")
+                         : QStringLiteral("Imported %1 ideas from file.").arg(importedCount));
+    LOG_INFO << importedCount << (importedCount == 1 ? " idea was imported from: " : " ideas were imported from: ")
+             << trimmedPath.toStdString();
+    return true;
+}
+
+bool AppController::createIdeaFromTextInternal(const QString &text, QString *errorMessage)
+{
     const auto trimmed = text.trimmed();
     if (trimmed.isEmpty()) {
-        setStatusMessage(QStringLiteral("Clipboard does not contain text."));
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("Text does not contain any content.");
+        }
         return false;
     }
 
     const auto title = ideaTitleFromText(trimmed);
     if (title.isEmpty()) {
-        setStatusMessage(QStringLiteral("Could not derive an idea title."));
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("Could not derive an idea title.");
+        }
         return false;
     }
 
     const auto pillars = lookupsRepository_->activeLookups(QStringLiteral("pillar"));
     if (pillars.empty()) {
-        setStatusMessage(QStringLiteral("No active pillars are available."));
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("No active pillars are available.");
+        }
         return false;
     }
 
-    LOG_INFO << "Creating inbox idea from pasted text with title '" << title.toStdString() << "'";
-    return createInboxItem(title, trimmed, pillars.front().id, {}, 0, {}, {});
+    LOG_INFO << "Creating inbox idea from text with title '" << title.toStdString() << "'";
+    return createInboxItem(title, trimmed, {}, pillars.front().id, {}, 0, {}, {});
 }
-
 QVariantMap AppController::contentDetails(const QString &contentId) const
 {
     if (!contentRepository_) {
@@ -346,6 +443,7 @@ QVariantMap AppController::contentDetails(const QString &contentId) const
         {QStringLiteral("id"), item.id},
         {QStringLiteral("title"), item.title},
         {QStringLiteral("description"), item.description},
+        {QStringLiteral("tags"), item.tags},
         {QStringLiteral("pillarId"), item.pillarId},
         {QStringLiteral("priority"), item.priority},
         {QStringLiteral("scheduledAt"), item.scheduledAt.isValid() ? item.scheduledAt.toString(Qt::ISODate) : QString{}},
@@ -396,6 +494,7 @@ QVariantMap AppController::publicationDetails(const QString &publicationId) cons
 bool AppController::updateContent(const QString &contentId,
                                   const QString &title,
                                   const QString &description,
+                                  const QString &tags,
                                   const QString &pillarId,
                                   int priority,
                                   const QString &scheduledAt,
@@ -425,6 +524,7 @@ bool AppController::updateContent(const QString &contentId,
     Domain::ContentItem updated = existing;
     updated.title = title.trimmed();
     updated.description = description.trimmed();
+    updated.tags = tags;
     updated.pillarId = pillarId;
     updated.priority = priority;
     updated.scheduledAt = scheduled;
@@ -538,6 +638,7 @@ bool AppController::deleteContent(const QString &contentId)
 
 bool AppController::createInboxItem(const QString &title,
                                     const QString &description,
+                                    const QString &tags,
                                     const QString &pillarId,
                                     const QString &seriesId,
                                     int priority,
@@ -564,6 +665,7 @@ bool AppController::createInboxItem(const QString &title,
     Domain::ContentItem content{
         .title = title.trimmed(),
         .description = description.trimmed(),
+        .tags = tags,
         .kindId = ideaKindId,
         .pillarId = pillarId,
         .suggestedChannelId = suggestedChannelId,
@@ -688,6 +790,31 @@ void AppController::loadLookupModels()
     pillarModel_.setItems(lookupsRepository_->activeLookups(QStringLiteral("pillar")));
     kindModel_.setItems(lookupsRepository_->activeLookups(QStringLiteral("content_kind")));
     channelModel_.setItems(lookupsRepository_->activeLookups(QStringLiteral("channel")));
+    syncContentStatusModels();
+}
+
+void AppController::syncContentStatusModels()
+{
+    if (!lookupsRepository_) {
+        return;
+    }
+
+    auto statuses = lookupsRepository_->contentStatuses();
+    contentStatusModel_.setItems(statuses);
+
+    std::map<QString, std::unique_ptr<Models::ContentListModel>> nextModels;
+    for (const auto &status : statuses) {
+        if (auto existing = boardModels_.extract(status.id); !existing.empty()) {
+            nextModels.emplace(status.id, std::move(existing.mapped()));
+            continue;
+        }
+
+        auto model = std::make_unique<Models::ContentListModel>();
+        model->setDescriptionPreviewWordCap(descriptionPreviewWordCap_);
+        nextModels.emplace(status.id, std::move(model));
+    }
+
+    boardModels_ = std::move(nextModels);
 }
 
 void AppController::refreshInbox()
@@ -697,15 +824,13 @@ void AppController::refreshInbox()
 
 void AppController::refreshBoard()
 {
-    boardInboxModel_.setItems(contentRepository_->boardItems(QStringLiteral("inbox"), boardShowArchived_));
-    boardClarifyingModel_.setItems(contentRepository_->boardItems(QStringLiteral("clarifying"), boardShowArchived_));
-    boardShapingModel_.setItems(contentRepository_->boardItems(QStringLiteral("shaping"), boardShowArchived_));
-    boardDraftingModel_.setItems(contentRepository_->boardItems(QStringLiteral("drafting"), boardShowArchived_));
-    boardReadyModel_.setItems(contentRepository_->boardItems(QStringLiteral("ready"), boardShowArchived_));
-    boardScheduledModel_.setItems(contentRepository_->boardItems(QStringLiteral("scheduled"), boardShowArchived_));
-    boardPublishedModel_.setItems(contentRepository_->boardItems(QStringLiteral("published"), boardShowArchived_));
-    boardReviewingModel_.setItems(contentRepository_->boardItems(QStringLiteral("reviewing"), boardShowArchived_));
-    boardArchivedModel_.setItems(contentRepository_->boardItems(QStringLiteral("archived"), boardShowArchived_));
+    for (const auto &status : contentStatusModel_.items()) {
+        const auto it = boardModels_.find(status.id);
+        if (it == boardModels_.end()) {
+            continue;
+        }
+        it->second->setItems(contentRepository_->boardItems(status.id, boardShowArchived_));
+    }
 }
 
 void AppController::refreshCalendar()

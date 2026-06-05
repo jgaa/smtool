@@ -44,6 +44,17 @@ CREATE TABLE burst_template (
     is_active INTEGER NOT NULL CHECK(is_active IN (0, 1))
 );
 
+CREATE TABLE tag (
+    id TEXT PRIMARY KEY
+);
+
+CREATE TABLE content_status (
+    id TEXT PRIMARY KEY,
+    info TEXT NOT NULL,
+    sort_order INTEGER NOT NULL UNIQUE,
+    is_system INTEGER NOT NULL DEFAULT 0 CHECK(is_system IN (0, 1))
+);
+
 CREATE TABLE series (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -65,7 +76,8 @@ CREATE TABLE content (
     pillar_id TEXT NOT NULL REFERENCES pillar(id),
     outcome_id TEXT NULL REFERENCES outcome(id),
     suggested_channel_id TEXT NULL REFERENCES channel(id),
-    status TEXT NOT NULL CHECK(status IN ('inbox', 'clarifying', 'shaping', 'drafting', 'ready', 'scheduled', 'published', 'reviewing', 'archived')),
+    status TEXT NOT NULL REFERENCES content_status(id) ON DELETE RESTRICT,
+    tags_cache TEXT NOT NULL DEFAULT '',
     priority INTEGER NOT NULL DEFAULT 0 CHECK(priority >= 0 AND priority <= 100),
     scheduled_at DATETIME NULL,
     published_at DATETIME NULL,
@@ -78,6 +90,12 @@ CREATE UNIQUE INDEX ux_content_parent_burst_template
 ON content(parent_id, burst_template_key)
 WHERE parent_id IS NOT NULL
   AND burst_template_key IS NOT NULL;
+
+CREATE TABLE content_tag (
+    content_id TEXT NOT NULL REFERENCES content(id) ON DELETE CASCADE,
+    tag_id TEXT NOT NULL REFERENCES tag(id),
+    PRIMARY KEY(content_id, tag_id)
+);
 
 CREATE TABLE note (
     id TEXT PRIMARY KEY,
@@ -98,3 +116,11 @@ CREATE TABLE publication (
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL
 );
+
+CREATE TRIGGER prevent_delete_system_content_status
+BEFORE DELETE ON content_status
+FOR EACH ROW
+WHEN OLD.is_system = 1
+BEGIN
+    SELECT RAISE(ABORT, 'System content status cannot be deleted');
+END;

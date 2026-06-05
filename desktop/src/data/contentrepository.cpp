@@ -3,11 +3,13 @@
 #include "domain/constants.h"
 
 #include <QDateTime>
+#include <QRegularExpression>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QUuid>
 
 #include <ranges>
+#include <set>
 
 using namespace Qt::Literals::StringLiterals;
 
@@ -27,6 +29,95 @@ QVariant nullableString(const QString &value)
 QVariant nullableDateTime(const QDateTime &value)
 {
     return value.isValid() ? QVariant{value.toString(Qt::ISODate)} : QVariant{};
+}
+
+QString normalizeTagToken(QString token)
+{
+    token = token.trimmed().toLower();
+    while (token.startsWith(u'#')) {
+        token.remove(0, 1);
+    }
+
+    static const QRegularExpression validPattern(QStringLiteral("^[a-z0-9_-]+$"));
+    return validPattern.match(token).hasMatch() ? token : QString{};
+}
+
+QStringList normalizedTags(const QString &input)
+{
+    const auto rawTokens = input.split(QRegularExpression(QStringLiteral("[,;\\s]+")), Qt::SkipEmptyParts);
+    std::set<QString> uniqueTags;
+    for (const auto &rawToken : rawTokens) {
+        const auto normalized = normalizeTagToken(rawToken);
+        if (!normalized.isEmpty()) {
+            uniqueTags.insert(normalized);
+        }
+    }
+
+    QStringList tags;
+    for (const auto &tag : uniqueTags) {
+        tags.append(tag);
+    }
+    return tags;
+}
+
+QString joinedTags(const QStringList &tags)
+{
+    return tags.isEmpty() ? QStringLiteral("") : tags.join(u' ');
+}
+
+bool execWithError(QSqlQuery &query, QString *errorMessage)
+{
+    if (query.exec()) {
+        return true;
+    }
+    if (errorMessage != nullptr) {
+        *errorMessage = query.lastError().text();
+    }
+    return false;
+}
+
+bool syncContentTags(QSqlDatabase db, const QString &contentId, const QString &tagsInput, QString *errorMessage)
+{
+    const auto tags = normalizedTags(tagsInput);
+
+    QSqlQuery clearLinks{db};
+    clearLinks.prepare(QStringLiteral("DELETE FROM content_tag WHERE content_id = :content_id"));
+    clearLinks.bindValue(":content_id"_L1, contentId);
+    if (!execWithError(clearLinks, errorMessage)) {
+        return false;
+    }
+
+    for (const auto &tag : tags) {
+        QSqlQuery insertTag{db};
+        insertTag.prepare(QStringLiteral("INSERT OR IGNORE INTO tag (id) VALUES (:id)"));
+        insertTag.bindValue(":id"_L1, tag);
+        if (!execWithError(insertTag, errorMessage)) {
+            return false;
+        }
+
+        QSqlQuery insertRef{db};
+        insertRef.prepare(QStringLiteral(
+            "INSERT INTO content_tag (content_id, tag_id) VALUES (:content_id, :tag_id)"));
+        insertRef.bindValue(":content_id"_L1, contentId);
+        insertRef.bindValue(":tag_id"_L1, tag);
+        if (!execWithError(insertRef, errorMessage)) {
+            return false;
+        }
+    }
+
+    QSqlQuery updateCache{db};
+    updateCache.prepare(QStringLiteral("UPDATE content SET tags_cache = :tags_cache WHERE id = :id"));
+    updateCache.bindValue(":tags_cache"_L1, joinedTags(tags));
+    updateCache.bindValue(":id"_L1, contentId);
+    return execWithError(updateCache, errorMessage);
+}
+
+bool contentStatusExists(const QSqlDatabase &db, const QString &status)
+{
+    QSqlQuery query{db};
+    query.prepare(QStringLiteral("SELECT EXISTS(SELECT 1 FROM content_status WHERE id = :status)"));
+    query.bindValue(":status"_L1, status);
+    return query.exec() && query.next() && query.value(0).toBool();
 }
 
 bool removeContentTree(QSqlDatabase &db, const QString &id, QString *errorMessage)
@@ -70,7 +161,7 @@ QString selectSummaryBase()
 {
     return QStringLiteral(
         "SELECT c.id, COALESCE(c.parent_id, ''), COALESCE(c.burst_template_key, ''), c.title, COALESCE(c.description, ''), "
-        "COALESCE(p.display_name, ''), COALESCE(s.name, ''), COALESCE(k.display_name, ''), COALESCE(o.display_name, ''), "
+        "COALESCE(c.tags_cache, ''), COALESCE(p.display_name, ''), COALESCE(s.name, ''), COALESCE(k.display_name, ''), COALESCE(o.display_name, ''), "
         "COALESCE(ch.display_name, ''), c.status, c.priority, c.scheduled_at, c.published_at "
         "FROM content c "
         "LEFT JOIN pillar p ON p.id = c.pillar_id "
@@ -99,7 +190,7 @@ std::vector<Domain::ContentSummary> ContentRepository::inboxItems() const
 
 std::vector<Domain::ContentSummary> ContentRepository::boardItems(const QString &status, bool includeArchived) const
 {
-    if (!Domain::isValidContentStatus(status)) {
+    if (!contentStatusExists(database_, status)) {
         return {};
     }
 
@@ -167,7 +258,7 @@ std::vector<Domain::BurstTemplate> ContentRepository::activeBurstTemplates() con
 
 QString ContentRepository::create(const Domain::ContentItem &content, QString *errorMessage) const
 {
-    if (!Domain::isValidContentStatus(content.status)) {
+    if (!contentStatusExists(database_, content.status)) {
         if (errorMessage != nullptr) {
             *errorMessage = QStringLiteral("Invalid content status: %1").arg(content.status);
         }
@@ -186,6 +277,9 @@ QString ContentRepository::create(const Domain::ContentItem &content, QString *e
     const auto publishedAt = content.status == "published"_L1 && !content.publishedAt.isValid()
         ? updatedAt
         : content.publishedAt;
+
+    QSqlQuery savepoint{database_};
+    savepoint.exec(QStringLiteral("SAVEPOINT content_create"));
 
     QSqlQuery query{database_};
     query.prepare(QStringLiteral(
@@ -211,11 +305,24 @@ QString ContentRepository::create(const Domain::ContentItem &content, QString *e
     query.bindValue(":created_at"_L1, createdAt.toString(Qt::ISODate));
     query.bindValue(":updated_at"_L1, updatedAt.toString(Qt::ISODate));
     if (!query.exec()) {
+        QSqlQuery rollback{database_};
+        rollback.exec(QStringLiteral("ROLLBACK TO SAVEPOINT content_create"));
+        rollback.exec(QStringLiteral("RELEASE SAVEPOINT content_create"));
         if (errorMessage != nullptr) {
             *errorMessage = query.lastError().text();
         }
         return {};
     }
+
+    if (!syncContentTags(database_, id, content.tags, errorMessage)) {
+        QSqlQuery rollback{database_};
+        rollback.exec(QStringLiteral("ROLLBACK TO SAVEPOINT content_create"));
+        rollback.exec(QStringLiteral("RELEASE SAVEPOINT content_create"));
+        return {};
+    }
+
+    QSqlQuery release{database_};
+    release.exec(QStringLiteral("RELEASE SAVEPOINT content_create"));
 
     return id;
 }
@@ -228,7 +335,7 @@ bool ContentRepository::update(const Domain::ContentItem &content, QString *erro
         }
         return false;
     }
-    if (!Domain::isValidContentStatus(content.status)) {
+    if (!contentStatusExists(database_, content.status)) {
         if (errorMessage != nullptr) {
             *errorMessage = QStringLiteral("Invalid content status: %1").arg(content.status);
         }
@@ -260,6 +367,9 @@ bool ContentRepository::update(const Domain::ContentItem &content, QString *erro
         ? updatedAt
         : existing.publishedAt;
 
+    QSqlQuery savepoint{database_};
+    savepoint.exec(QStringLiteral("SAVEPOINT content_update"));
+
     QSqlQuery query{database_};
     query.prepare(QStringLiteral(
         "UPDATE content SET "
@@ -284,9 +394,20 @@ bool ContentRepository::update(const Domain::ContentItem &content, QString *erro
     query.bindValue(":published_at"_L1, nullableDateTime(publishedAt));
     query.bindValue(":updated_at"_L1, updatedAt.toString(Qt::ISODate));
     if (query.exec()) {
+        if (!syncContentTags(database_, content.id, content.tags, errorMessage)) {
+            QSqlQuery rollback{database_};
+            rollback.exec(QStringLiteral("ROLLBACK TO SAVEPOINT content_update"));
+            rollback.exec(QStringLiteral("RELEASE SAVEPOINT content_update"));
+            return false;
+        }
+        QSqlQuery release{database_};
+        release.exec(QStringLiteral("RELEASE SAVEPOINT content_update"));
         return true;
     }
 
+    QSqlQuery rollback{database_};
+    rollback.exec(QStringLiteral("ROLLBACK TO SAVEPOINT content_update"));
+    rollback.exec(QStringLiteral("RELEASE SAVEPOINT content_update"));
     if (errorMessage != nullptr) {
         *errorMessage = query.lastError().text();
     }
@@ -303,7 +424,7 @@ bool ContentRepository::updateStatus(const QString &id, const QString &newStatus
         return false;
     }
 
-    if (!Domain::isValidContentStatus(newStatus)) {
+    if (!contentStatusExists(database_, newStatus)) {
         if (errorMessage != nullptr) {
             *errorMessage = QStringLiteral("Invalid content status: %1").arg(newStatus);
         }
@@ -452,6 +573,7 @@ bool ContentRepository::createBurst(const QString &sourceContentId,
             .burstTemplateKey = burstTemplateKey,
             .title = source.title + templateQuery.value(1).toString(),
             .description = source.description,
+            .tags = source.tags,
             .kindId = templateQuery.value(2).toString(),
             .pillarId = source.pillarId,
             .outcomeId = templateQuery.value(3).toString(),
@@ -485,18 +607,36 @@ std::vector<Domain::ContentSummary> ContentRepository::runSummaryQuery(QSqlQuery
             .burstTemplateKey = query.value(2).toString(),
             .title = query.value(3).toString(),
             .description = query.value(4).toString(),
-            .pillarName = query.value(5).toString(),
-            .seriesName = query.value(6).toString(),
-            .kindName = query.value(7).toString(),
-            .outcomeName = query.value(8).toString(),
-            .suggestedChannelName = query.value(9).toString(),
-            .status = query.value(10).toString(),
-            .priority = query.value(11).toInt(),
-            .scheduledAt = query.value(12).toDateTime(),
-            .publishedAt = query.value(13).toDateTime(),
+            .tags = query.value(5).toString(),
+            .pillarName = query.value(6).toString(),
+            .seriesName = query.value(7).toString(),
+            .kindName = query.value(8).toString(),
+            .outcomeName = query.value(9).toString(),
+            .suggestedChannelName = query.value(10).toString(),
+            .status = query.value(11).toString(),
+            .priority = query.value(12).toInt(),
+            .scheduledAt = query.value(13).toDateTime(),
+            .publishedAt = query.value(14).toDateTime(),
         });
     }
     return results;
+}
+
+QStringList ContentRepository::contentTags(const QString &contentId) const
+{
+    QSqlQuery query{database_};
+    query.prepare(QStringLiteral(
+        "SELECT ct.tag_id FROM content_tag ct "
+        "WHERE ct.content_id = :content_id "
+        "ORDER BY ct.tag_id ASC"));
+    query.bindValue(":content_id"_L1, contentId);
+    query.exec();
+
+    QStringList tags;
+    while (query.next()) {
+        tags.append(query.value(0).toString());
+    }
+    return tags;
 }
 
 Domain::ContentItem ContentRepository::getContentById(const QString &id) const
@@ -519,6 +659,7 @@ Domain::ContentItem ContentRepository::getContentById(const QString &id) const
         .burstTemplateKey = query.value(3).toString(),
         .title = query.value(4).toString(),
         .description = query.value(5).toString(),
+        .tags = joinedTags(contentTags(id)),
         .kindId = query.value(6).toString(),
         .pillarId = query.value(7).toString(),
         .outcomeId = query.value(8).toString(),

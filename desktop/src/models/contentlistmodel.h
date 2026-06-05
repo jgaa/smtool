@@ -20,6 +20,8 @@ public:
         TitleRole,
         DescriptionRole,
         DescriptionPreviewRole,
+        TagsRole,
+        DisplayTagsRole,
         PillarRole,
         SeriesRole,
         KindRole,

@@ -9,36 +9,6 @@ namespace SmTool::Domain {
 
 using namespace Qt::Literals::StringLiterals;
 
-inline constexpr auto contentStatuses = std::array{
-    "inbox"_L1,
-    "clarifying"_L1,
-    "shaping"_L1,
-    "drafting"_L1,
-    "ready"_L1,
-    "scheduled"_L1,
-    "published"_L1,
-    "reviewing"_L1,
-    "archived"_L1,
-};
-
-inline constexpr auto activeBoardStatuses = std::array{
-    "inbox"_L1,
-    "clarifying"_L1,
-    "shaping"_L1,
-    "drafting"_L1,
-    "ready"_L1,
-    "scheduled"_L1,
-    "published"_L1,
-    "reviewing"_L1,
-};
-
-inline constexpr auto fallbackStatuses = std::array{
-    "inbox"_L1,
-    "clarifying"_L1,
-    "shaping"_L1,
-    "drafting"_L1,
-};
-
 inline constexpr auto seriesStatuses = std::array{
     "active"_L1,
     "paused"_L1,
@@ -86,6 +56,11 @@ inline constexpr auto seededChannels = std::array{
     "linkedin"_L1,
     "mastodon"_L1,
     "newsletter"_L1,
+    "tiktok"_L1,
+    "x"_L1,
+    "reddit"_L1,
+    "bluesky"_L1,
+    "matrix"_L1,
 };
 
 inline std::optional<int> indexOf(const auto &values, const QAnyStringView needle)
@@ -98,11 +73,6 @@ inline std::optional<int> indexOf(const auto &values, const QAnyStringView needl
     return std::nullopt;
 }
 
-inline bool isValidContentStatus(const QAnyStringView value)
-{
-    return indexOf(contentStatuses, value).has_value();
-}
-
 inline bool isValidSeriesStatus(const QAnyStringView value)
 {
     return indexOf(seriesStatuses, value).has_value();
@@ -111,29 +81,6 @@ inline bool isValidSeriesStatus(const QAnyStringView value)
 inline bool isValidPublicationStatus(const QAnyStringView value)
 {
     return indexOf(publicationStatuses, value).has_value();
-}
-
-inline bool canTransitionContentStatus(const QAnyStringView from, const QAnyStringView to)
-{
-    if (from == to) {
-        return true;
-    }
-
-    if (to == "archived"_L1) {
-        return from == "reviewing"_L1;
-    }
-
-    if (indexOf(fallbackStatuses, to).has_value() && from != "archived"_L1) {
-        return true;
-    }
-
-    const auto fromIndex = indexOf(contentStatuses, from);
-    const auto toIndex = indexOf(contentStatuses, to);
-    if (!fromIndex.has_value() || !toIndex.has_value()) {
-        return false;
-    }
-
-    return *toIndex == *fromIndex + 1;
 }
 
 inline QString titleFromKey(const QAnyStringView key)

@@ -20,7 +20,7 @@ else()
 endif()
 FetchContent_MakeAvailable(logfault)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Quick Qml QuickControls2 Sql Test)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Quick Qml QuickControls2 Sql Test Widgets)
 
 qt_standard_project_setup(REQUIRES 6.5)
 
@@ -38,6 +38,7 @@ set(SMTOOL_SOURCES
     src/data/seriesrepository.cpp
     src/models/calendarentrymodel.cpp
     src/models/contentlistmodel.cpp
+    src/models/contentstatuslistmodel.cpp
     src/models/dashboardmetricmodel.cpp
     src/models/lookuplistmodel.cpp
     src/models/serieslistmodel.cpp
@@ -58,6 +59,7 @@ set(SMTOOL_HEADERS
     src/domain/entities.h
     src/models/calendarentrymodel.h
     src/models/contentlistmodel.h
+    src/models/contentstatuslistmodel.h
     src/models/dashboardmetricmodel.h
     src/models/lookuplistmodel.h
     src/models/serieslistmodel.h
@@ -105,6 +107,7 @@ target_link_libraries(SmToolApp
         Qt6::Qml
         Qt6::QuickControls2
         Qt6::Sql
+        Qt6::Widgets
         logfault::logfault
 )
 
@@ -122,6 +125,7 @@ qt_add_executable(SmToolTests
     src/data/seriesrepository.cpp
     src/models/calendarentrymodel.cpp
     src/models/contentlistmodel.cpp
+    src/models/contentstatuslistmodel.cpp
     src/models/dashboardmetricmodel.cpp
     src/models/lookuplistmodel.cpp
     src/models/serieslistmodel.cpp
@@ -144,6 +148,7 @@ target_link_libraries(SmToolTests
         Qt6::Gui
         Qt6::Sql
         Qt6::Test
+        Qt6::Widgets
         logfault::logfault
 )
 

@@ -32,6 +32,13 @@ struct BurstTemplateSeed {
     QLatin1StringView outcomeKey;
 };
 
+struct ContentStatusSeed {
+    QLatin1StringView id;
+    QLatin1StringView info;
+    int sortOrder;
+    bool isSystem;
+};
+
 constexpr auto burstTemplates = std::array{
     BurstTemplateSeed{"linkedin_key_lesson"_L1, "LinkedIn Key Lesson"_L1, " - Key Lesson"_L1, "short_post"_L1, "linkedin"_L1, "authority"_L1},
     BurstTemplateSeed{"linkedin_opinion_angle"_L1, "LinkedIn Opinion Angle"_L1, " - Opinion Angle"_L1, "short_post"_L1, "linkedin"_L1, "discussion"_L1},
@@ -40,9 +47,289 @@ constexpr auto burstTemplates = std::array{
     BurstTemplateSeed{"newsletter_summary"_L1, "Newsletter Summary"_L1, " - Newsletter Summary"_L1, "newsletter"_L1, "newsletter"_L1, "trust"_L1},
 };
 
+constexpr auto contentStatuses = std::array{
+    ContentStatusSeed{"inbox"_L1, R"(## Workflow States
+
+### Inbox
+
+New ideas that have not yet been evaluated.
+
+Questions:
+
+* Is this worth keeping?
+* Does it belong in smtool?
+* Is it actionable?
+
+Typical contents:
+
+* Voice notes
+* Random thoughts
+* Links
+* Half-formed ideas
+
+Exit criteria:
+
+* The idea is worth keeping.
+* The basic intent is understood.
+
+Move to:
+
+* Clarifying)"_L1, 0, true},
+    ContentStatusSeed{"clarifying"_L1, R"(## Workflow States
+
+### Clarifying
+
+Determine what the content is actually about.
+
+Questions:
+
+* What is the core idea?
+* Why does this matter?
+* Who is it for?
+* Which pillar does it belong to?
+
+Typical activities:
+
+* Rewrite title
+* Add notes
+* Assign pillar
+* Assign series
+* Define audience
+
+Exit criteria:
+
+* The idea can be explained in one or two sentences.
+* Target audience is understood.
+
+Move to:
+
+* Shaping)"_L1, 1, false},
+    ContentStatusSeed{"shaping"_L1, R"(## Workflow States
+
+### Shaping
+
+Decide the form and structure of the content.
+
+Questions:
+
+* Blog post?
+* Video?
+* LinkedIn post?
+* Series entry?
+* Long-form source content?
+
+Typical activities:
+
+* Create outline
+* Define deliverables
+* Define desired outcome
+* Decide whether this becomes source content for a burst
+
+Exit criteria:
+
+* Structure exists.
+* Format has been chosen.
+* Scope is understood.
+
+Move to:
+
+* Drafting)"_L1, 2, false},
+    ContentStatusSeed{"drafting"_L1, R"(## Workflow States
+
+### Drafting
+
+Create the actual content.
+
+Questions:
+
+* What needs to be written, recorded, or designed?
+
+Typical activities:
+
+* Write draft
+* Record video
+* Create illustrations
+* Gather screenshots
+* Research details
+
+Exit criteria:
+
+* Content exists in a complete first version.
+
+Move to:
+
+* Ready)"_L1, 3, false},
+    ContentStatusSeed{"ready"_L1, R"(## Workflow States
+
+### Ready
+
+Content is complete and awaiting scheduling.
+
+Questions:
+
+* Is this good enough to publish?
+* Does it need final review?
+
+Typical activities:
+
+* Proofreading
+* Final edits
+* Metadata
+* Thumbnail creation
+* Link checks
+
+Exit criteria:
+
+* No further content work is required.
+
+Move to:
+
+* Scheduled)"_L1, 4, false},
+    ContentStatusSeed{"scheduled"_L1, R"(## Workflow States
+
+### Scheduled
+
+Content has a planned publication date.
+
+Questions:
+
+* When should this be published?
+* Which channel receives it?
+
+Typical activities:
+
+* Assign publish dates
+* Create publication records
+* Coordinate with related content
+
+Exit criteria:
+
+* Publication has occurred.
+
+Move to:
+
+* Published)"_L1, 5, false},
+    ContentStatusSeed{"published"_L1, R"(## Workflow States
+
+### Published
+
+Content has been released.
+
+Questions:
+
+* Was publication successful?
+* Were all intended channels used?
+
+Typical activities:
+
+* Record publication URLs
+* Verify links
+* Verify channel coverage
+
+Exit criteria:
+
+* Initial publication work is complete.
+
+Move to:
+
+* Reviewing)"_L1, 6, false},
+    ContentStatusSeed{"reviewing"_L1, R"(## Workflow States
+
+### Reviewing
+
+Evaluate results and lessons learned.
+
+Questions:
+
+* Did the content achieve its goal?
+* Should derivatives be created?
+* Should similar content be created again?
+
+Typical activities:
+
+* Review engagement
+* Capture lessons learned
+* Identify follow-up ideas
+* Create new content from insights
+
+Exit criteria:
+
+* Review completed.
+* No immediate follow-up required.
+
+Move to:
+
+* Archived)"_L1, 7, false},
+    ContentStatusSeed{"archived"_L1, R"(## Workflow States
+
+### Archived
+
+Content lifecycle is complete.
+
+Purpose:
+
+Historical reference and reporting.
+
+Typical contents:
+
+* Finished content
+* Completed reviews
+* Retired ideas
+
+Notes:
+
+Archived items remain searchable and reportable.
+No further workflow actions are expected.)"_L1, 8, true},
+};
+
+
 QString nowIso()
 {
     return QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
+}
+
+QStringList splitSqlStatements(const QString &sql)
+{
+    QStringList statements;
+    QString current;
+    bool inTrigger = false;
+
+    const auto lines = sql.split(u'\n');
+    for (const auto &line : lines) {
+        const auto trimmed = line.trimmed();
+        if (trimmed.isEmpty()) {
+            continue;
+        }
+
+        if (!current.isEmpty()) {
+            current.append(u'\n');
+        }
+        current.append(line);
+
+        if (!inTrigger && trimmed.startsWith(QStringLiteral("CREATE TRIGGER"), Qt::CaseInsensitive)) {
+            inTrigger = true;
+        }
+
+        if (inTrigger) {
+            if (trimmed == "END;"_L1) {
+                statements.append(current.trimmed());
+                current.clear();
+                inTrigger = false;
+            }
+            continue;
+        }
+
+        if (trimmed.endsWith(u';')) {
+            statements.append(current.trimmed());
+            current.clear();
+        }
+    }
+
+    if (!current.trimmed().isEmpty()) {
+        statements.append(current.trimmed());
+    }
+
+    return statements;
 }
 
 bool executeQuery(QSqlQuery &query, QString *errorMessage)
@@ -68,6 +355,19 @@ bool insertLookup(QSqlDatabase db, const QString &tableName, QAnyStringView key,
     query.bindValue(":key"_L1, key.toString());
     query.bindValue(":display_name"_L1, Domain::titleFromKey(key));
     query.bindValue(":sort_order"_L1, sortOrder);
+    return executeQuery(query, errorMessage);
+}
+
+bool insertContentStatus(QSqlDatabase db, const ContentStatusSeed &seed, QString *errorMessage)
+{
+    QSqlQuery query{db};
+    query.prepare(QStringLiteral(
+        "INSERT INTO content_status (id, info, sort_order, is_system) "
+        "VALUES (:id, :info, :sort_order, :is_system)"));
+    query.bindValue(":id"_L1, seed.id.toString());
+    query.bindValue(":info"_L1, seed.info.toString());
+    query.bindValue(":sort_order"_L1, seed.sortOrder);
+    query.bindValue(":is_system"_L1, seed.isSystem ? 1 : 0);
     return executeQuery(query, errorMessage);
 }
 
@@ -279,7 +579,7 @@ bool Database::applyMigrations(QString *errorMessage)
     }
 
     const auto migrationSql = QString::fromUtf8(migrationFile.readAll());
-    const auto statements = migrationSql.split(u';', Qt::SkipEmptyParts);
+    const auto statements = splitSqlStatements(migrationSql);
     auto db = connection();
     if (!db.transaction()) {
         if (errorMessage != nullptr) {
@@ -319,10 +619,6 @@ bool Database::applyMigrations(QString *errorMessage)
 bool Database::seedDefaults(QString *errorMessage)
 {
     auto db = connection();
-    if (tableHasRows(db, "pillar"_L1, errorMessage)) {
-        return true;
-    }
-
     if (!db.transaction()) {
         if (errorMessage != nullptr) {
             *errorMessage = db.lastError().text();
@@ -335,41 +631,62 @@ bool Database::seedDefaults(QString *errorMessage)
         return false;
     };
 
-    for (int index = 0; index < static_cast<int>(Domain::seededPillars.size()); ++index) {
-        if (!insertLookup(db, QStringLiteral("pillar"), Domain::seededPillars.at(index), index, errorMessage)) {
-            return rollbackOnFailure();
-        }
-    }
-    for (int index = 0; index < static_cast<int>(Domain::seededContentKinds.size()); ++index) {
-        if (!insertLookup(db, QStringLiteral("content_kind"), Domain::seededContentKinds.at(index), index, errorMessage)) {
-            return rollbackOnFailure();
-        }
-    }
-    for (int index = 0; index < static_cast<int>(Domain::seededOutcomes.size()); ++index) {
-        if (!insertLookup(db, QStringLiteral("outcome"), Domain::seededOutcomes.at(index), index, errorMessage)) {
-            return rollbackOnFailure();
-        }
-    }
-    for (int index = 0; index < static_cast<int>(Domain::seededChannels.size()); ++index) {
-        if (!insertLookup(db, QStringLiteral("channel"), Domain::seededChannels.at(index), index, errorMessage)) {
-            return rollbackOnFailure();
+    if (!tableHasRows(db, "content_status"_L1, errorMessage)) {
+        for (const auto &seed : contentStatuses) {
+            if (!insertContentStatus(db, seed, errorMessage)) {
+                return rollbackOnFailure();
+            }
         }
     }
 
-    for (const auto &seed : burstTemplates) {
-        QSqlQuery insertQuery{db};
-        insertQuery.prepare(QStringLiteral(
-            "INSERT INTO burst_template "
-            "(key, display_name, title_suffix, kind_id, suggested_channel_id, outcome_id, is_active) "
-            "VALUES (:key, :display_name, :title_suffix, :kind_id, :suggested_channel_id, :outcome_id, 1)"));
-        insertQuery.bindValue(":key"_L1, seed.key.toString());
-        insertQuery.bindValue(":display_name"_L1, seed.displayName.toString());
-        insertQuery.bindValue(":title_suffix"_L1, seed.titleSuffix.toString());
-        insertQuery.bindValue(":kind_id"_L1, lookupIdByKey(db, "content_kind"_L1, seed.kindKey, errorMessage));
-        insertQuery.bindValue(":suggested_channel_id"_L1, lookupIdByKey(db, "channel"_L1, seed.channelKey, errorMessage));
-        insertQuery.bindValue(":outcome_id"_L1, lookupIdByKey(db, "outcome"_L1, seed.outcomeKey, errorMessage));
-        if (!executeQuery(insertQuery, errorMessage)) {
-            return rollbackOnFailure();
+    if (!tableHasRows(db, "pillar"_L1, errorMessage)) {
+        for (int index = 0; index < static_cast<int>(Domain::seededPillars.size()); ++index) {
+            if (!insertLookup(db, QStringLiteral("pillar"), Domain::seededPillars.at(index), index, errorMessage)) {
+                return rollbackOnFailure();
+            }
+        }
+    }
+
+    if (!tableHasRows(db, "content_kind"_L1, errorMessage)) {
+        for (int index = 0; index < static_cast<int>(Domain::seededContentKinds.size()); ++index) {
+            if (!insertLookup(db, QStringLiteral("content_kind"), Domain::seededContentKinds.at(index), index, errorMessage)) {
+                return rollbackOnFailure();
+            }
+        }
+    }
+
+    if (!tableHasRows(db, "outcome"_L1, errorMessage)) {
+        for (int index = 0; index < static_cast<int>(Domain::seededOutcomes.size()); ++index) {
+            if (!insertLookup(db, QStringLiteral("outcome"), Domain::seededOutcomes.at(index), index, errorMessage)) {
+                return rollbackOnFailure();
+            }
+        }
+    }
+
+    if (!tableHasRows(db, "channel"_L1, errorMessage)) {
+        for (int index = 0; index < static_cast<int>(Domain::seededChannels.size()); ++index) {
+            if (!insertLookup(db, QStringLiteral("channel"), Domain::seededChannels.at(index), index, errorMessage)) {
+                return rollbackOnFailure();
+            }
+        }
+    }
+
+    if (!tableHasRows(db, "burst_template"_L1, errorMessage)) {
+        for (const auto &seed : burstTemplates) {
+            QSqlQuery insertQuery{db};
+            insertQuery.prepare(QStringLiteral(
+                "INSERT INTO burst_template "
+                "(key, display_name, title_suffix, kind_id, suggested_channel_id, outcome_id, is_active) "
+                "VALUES (:key, :display_name, :title_suffix, :kind_id, :suggested_channel_id, :outcome_id, 1)"));
+            insertQuery.bindValue(":key"_L1, seed.key.toString());
+            insertQuery.bindValue(":display_name"_L1, seed.displayName.toString());
+            insertQuery.bindValue(":title_suffix"_L1, seed.titleSuffix.toString());
+            insertQuery.bindValue(":kind_id"_L1, lookupIdByKey(db, "content_kind"_L1, seed.kindKey, errorMessage));
+            insertQuery.bindValue(":suggested_channel_id"_L1, lookupIdByKey(db, "channel"_L1, seed.channelKey, errorMessage));
+            insertQuery.bindValue(":outcome_id"_L1, lookupIdByKey(db, "outcome"_L1, seed.outcomeKey, errorMessage));
+            if (!executeQuery(insertQuery, errorMessage)) {
+                return rollbackOnFailure();
+            }
         }
     }
 

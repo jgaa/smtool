@@ -30,6 +30,7 @@ public:
 private:
     [[nodiscard]] std::vector<Domain::ContentSummary> runSummaryQuery(QSqlQuery &query) const;
     [[nodiscard]] Domain::ContentItem getContentById(const QString &id) const;
+    [[nodiscard]] QStringList contentTags(const QString &contentId) const;
 
     QSqlDatabase database_;
 };

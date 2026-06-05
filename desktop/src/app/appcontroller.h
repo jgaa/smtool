@@ -8,6 +8,7 @@
 #include "data/seriesrepository.h"
 #include "models/calendarentrymodel.h"
 #include "models/contentlistmodel.h"
+#include "models/contentstatuslistmodel.h"
 #include "models/dashboardmetricmodel.h"
 #include "models/lookuplistmodel.h"
 #include "models/serieslistmodel.h"
@@ -15,21 +16,16 @@
 #include <QObject>
 #include <QVariantMap>
 
+#include <map>
+#include <memory>
+
 namespace SmTool::App {
 
 class AppController : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(SmTool::Models::ContentListModel *inboxModel READ inboxModel CONSTANT)
-    Q_PROPERTY(SmTool::Models::ContentListModel *boardInboxModel READ boardInboxModel CONSTANT)
-    Q_PROPERTY(SmTool::Models::ContentListModel *boardClarifyingModel READ boardClarifyingModel CONSTANT)
-    Q_PROPERTY(SmTool::Models::ContentListModel *boardShapingModel READ boardShapingModel CONSTANT)
-    Q_PROPERTY(SmTool::Models::ContentListModel *boardDraftingModel READ boardDraftingModel CONSTANT)
-    Q_PROPERTY(SmTool::Models::ContentListModel *boardReadyModel READ boardReadyModel CONSTANT)
-    Q_PROPERTY(SmTool::Models::ContentListModel *boardScheduledModel READ boardScheduledModel CONSTANT)
-    Q_PROPERTY(SmTool::Models::ContentListModel *boardPublishedModel READ boardPublishedModel CONSTANT)
-    Q_PROPERTY(SmTool::Models::ContentListModel *boardReviewingModel READ boardReviewingModel CONSTANT)
-    Q_PROPERTY(SmTool::Models::ContentListModel *boardArchivedModel READ boardArchivedModel CONSTANT)
+    Q_PROPERTY(SmTool::Models::ContentStatusListModel *contentStatusModel READ contentStatusModel CONSTANT)
     Q_PROPERTY(SmTool::Models::CalendarEntryModel *calendarModel READ calendarModel CONSTANT)
     Q_PROPERTY(SmTool::Models::ContentListModel *sourceModel READ sourceModel CONSTANT)
     Q_PROPERTY(SmTool::Models::ContentListModel *derivativeModel READ derivativeModel CONSTANT)
@@ -59,15 +55,7 @@ public:
     void setDescriptionPreviewWordCap(int value);
 
     [[nodiscard]] Models::ContentListModel *inboxModel();
-    [[nodiscard]] Models::ContentListModel *boardInboxModel();
-    [[nodiscard]] Models::ContentListModel *boardClarifyingModel();
-    [[nodiscard]] Models::ContentListModel *boardShapingModel();
-    [[nodiscard]] Models::ContentListModel *boardDraftingModel();
-    [[nodiscard]] Models::ContentListModel *boardReadyModel();
-    [[nodiscard]] Models::ContentListModel *boardScheduledModel();
-    [[nodiscard]] Models::ContentListModel *boardPublishedModel();
-    [[nodiscard]] Models::ContentListModel *boardReviewingModel();
-    [[nodiscard]] Models::ContentListModel *boardArchivedModel();
+    [[nodiscard]] Models::ContentStatusListModel *contentStatusModel();
     [[nodiscard]] Models::CalendarEntryModel *calendarModel();
     [[nodiscard]] Models::ContentListModel *sourceModel();
     [[nodiscard]] Models::ContentListModel *derivativeModel();
@@ -107,11 +95,15 @@ public:
     Q_INVOKABLE void copyTextToClipboard(const QString &text) const;
     Q_INVOKABLE bool pasteClipboardToIdea();
     Q_INVOKABLE bool createIdeaFromText(const QString &text);
+    Q_INVOKABLE bool importIdeasFromUserSelectedFile();
+    Q_INVOKABLE bool importIdeasFromFile(const QString &filePath);
+    Q_INVOKABLE QObject *boardModelForStatus(const QString &statusId) const;
     Q_INVOKABLE QVariantMap contentDetails(const QString &contentId) const;
     Q_INVOKABLE QVariantMap publicationDetails(const QString &publicationId) const;
     Q_INVOKABLE bool updateContent(const QString &contentId,
                                    const QString &title,
                                    const QString &description,
+                                   const QString &tags,
                                    const QString &pillarId,
                                    int priority,
                                    const QString &scheduledAt,
@@ -128,6 +120,7 @@ public:
     Q_INVOKABLE bool deleteContent(const QString &contentId);
     Q_INVOKABLE bool createInboxItem(const QString &title,
                                      const QString &description,
+                                     const QString &tags,
                                      const QString &pillarId,
                                      const QString &seriesId,
                                      int priority,
@@ -151,6 +144,7 @@ private:
     void initializeRepositories();
     void resetRepositories();
     void loadLookupModels();
+    void syncContentStatusModels();
     void refreshInbox();
     void refreshBoard();
     void refreshCalendar();
@@ -160,6 +154,7 @@ private:
     void refreshDashboard();
     void refreshClipboardHasText();
     void setStatusMessage(const QString &message);
+    bool createIdeaFromTextInternal(const QString &text, QString *errorMessage = nullptr);
 
     Data::Database database_;
     std::unique_ptr<Data::LookupsRepository> lookupsRepository_;
@@ -169,15 +164,7 @@ private:
     std::unique_ptr<Data::DashboardRepository> dashboardRepository_;
 
     Models::ContentListModel inboxModel_;
-    Models::ContentListModel boardInboxModel_;
-    Models::ContentListModel boardClarifyingModel_;
-    Models::ContentListModel boardShapingModel_;
-    Models::ContentListModel boardDraftingModel_;
-    Models::ContentListModel boardReadyModel_;
-    Models::ContentListModel boardScheduledModel_;
-    Models::ContentListModel boardPublishedModel_;
-    Models::ContentListModel boardReviewingModel_;
-    Models::ContentListModel boardArchivedModel_;
+    Models::ContentStatusListModel contentStatusModel_;
     Models::CalendarEntryModel calendarModel_;
     Models::ContentListModel sourceModel_;
     Models::ContentListModel derivativeModel_;
@@ -200,6 +187,8 @@ private:
     bool clipboardHasText_ = false;
     QString currentSourceId_;
     QString statusMessage_;
+    int descriptionPreviewWordCap_ = 20;
+    std::map<QString, std::unique_ptr<Models::ContentListModel>> boardModels_;
 };
 
 } // namespace SmTool::App

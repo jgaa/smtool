@@ -16,6 +16,13 @@ struct LookupValue {
     bool isActive = true;
 };
 
+struct ContentStatus {
+    QString id;
+    QString info;
+    int sortOrder = 0;
+    bool isSystem = false;
+};
+
 struct BurstTemplate {
     QString key;
     QString displayName;
@@ -43,6 +50,7 @@ struct ContentItem {
     QString burstTemplateKey;
     QString title;
     QString description;
+    QString tags;
     QString kindId;
     QString pillarId;
     QString outcomeId;
@@ -62,6 +70,7 @@ struct ContentSummary {
     QString burstTemplateKey;
     QString title;
     QString description;
+    QString tags;
     QString pillarName;
     QString seriesName;
     QString kindName;

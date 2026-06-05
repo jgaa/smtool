@@ -33,6 +33,27 @@ std::vector<Domain::LookupValue> LookupsRepository::activeLookups(const QString 
     return results;
 }
 
+std::vector<Domain::ContentStatus> LookupsRepository::contentStatuses() const
+{
+    QSqlQuery query{database_};
+    query.prepare(QStringLiteral(
+        "SELECT id, COALESCE(info, ''), sort_order, is_system "
+        "FROM content_status "
+        "ORDER BY sort_order ASC, id ASC"));
+    query.exec();
+
+    std::vector<Domain::ContentStatus> results;
+    while (query.next()) {
+        results.push_back({
+            .id = query.value(0).toString(),
+            .info = query.value(1).toString(),
+            .sortOrder = query.value(2).toInt(),
+            .isSystem = query.value(3).toBool(),
+        });
+    }
+    return results;
+}
+
 QString LookupsRepository::lookupIdByKey(const QString &tableName, const QString &key) const
 {
     QSqlQuery query{database_};

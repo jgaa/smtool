@@ -17,12 +17,12 @@ std::vector<Domain::CalendarEntry> DashboardRepository::calendarEntries(bool inc
     QSqlQuery query{database_};
     query.prepare(QStringLiteral(
         "SELECT pub.id, c.id, c.title, COALESCE(s.name, ''), COALESCE(ch.display_name, ''), 'publication', "
-        "c.status, pub.status, COALESCE(pub.scheduled_at, c.scheduled_at) "
+        "c.status, pub.status, pub.scheduled_at "
         "FROM publication pub "
         "JOIN content c ON c.id = pub.content_id "
         "LEFT JOIN series s ON s.id = c.series_id "
         "JOIN channel ch ON ch.id = pub.channel_id "
-        "WHERE COALESCE(pub.scheduled_at, c.scheduled_at) IS NOT NULL "
+        "WHERE pub.scheduled_at IS NOT NULL "
         "  AND (:include_archived = 1 OR c.status != 'archived') "
         "  AND (:include_published = 1 OR (COALESCE(pub.status, '') != 'published' AND pub.published_at IS NULL)) "
         "UNION ALL "
@@ -33,7 +33,6 @@ std::vector<Domain::CalendarEntry> DashboardRepository::calendarEntries(bool inc
         "WHERE c.scheduled_at IS NOT NULL "
         "  AND (:include_archived = 1 OR c.status != 'archived') "
         "  AND (:include_published = 1 OR c.status != 'published') "
-        "  AND NOT EXISTS (SELECT 1 FROM publication pub WHERE pub.content_id = c.id) "
         "ORDER BY 9 ASC, 3 ASC"));
     query.bindValue(":include_archived"_L1, includeArchived ? 1 : 0);
     query.bindValue(":include_published"_L1, includePublished ? 1 : 0);

@@ -3,16 +3,20 @@
 #include "app/appsettings.h"
 #include "app/loggingcontroller.h"
 
+#include <QApplication>
 #include <QCommandLineOption>
 #include <QCommandLineParser>
-#include <QGuiApplication>
+#include <QDir>
+#include <QFileInfo>
+#include <QLockFile>
+#include <QMessageBox>
 #include <QQmlError>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 
 int main(int argc, char *argv[])
 {
-    QGuiApplication app(argc, argv);
+    QApplication app(argc, argv);
     QCoreApplication::setApplicationName(QStringLiteral("SmTool"));
     QCoreApplication::setApplicationVersion(QStringLiteral(SMTOOL_VERSION));
     QCoreApplication::setOrganizationName(QStringLiteral("smtool"));
@@ -41,6 +45,26 @@ int main(int argc, char *argv[])
 
     const auto commandLineDatabasePath = parser.value(databasePathOption).trimmed();
     const auto effectiveDatabasePath = appSettings.effectiveDatabasePath(commandLineDatabasePath);
+    const auto databaseDirectory = QFileInfo{effectiveDatabasePath}.absolutePath();
+    if (!QDir{}.mkpath(databaseDirectory)) {
+        const auto message = QStringLiteral("SmTool could not create the database directory:\n%1").arg(databaseDirectory);
+        LOG_ERROR << message.toStdString();
+        QMessageBox::critical(nullptr, QStringLiteral("SmTool"), message);
+        return 1;
+    }
+
+    QLockFile appLock{QDir{databaseDirectory}.filePath(QStringLiteral("smtool.lock"))};
+    if (!appLock.tryLock()) {
+        const auto message = QStringLiteral(
+            "SmTool is already running for this database location.\n\n"
+            "Close the other instance before starting a new one.");
+        LOG_ERROR << "Failed to acquire app lock at '"
+                  << appLock.fileName().toStdString()
+                  << "': another instance is already running";
+        QMessageBox::warning(nullptr, QStringLiteral("SmTool Already Running"), message);
+        return 1;
+    }
+
     if (commandLineDatabasePath.isEmpty() && effectiveDatabasePath != appSettings.defaultDatabasePath()) {
         QString startupMoveError;
         if (!SmTool::Data::Database::moveDatabaseFile(appSettings.defaultDatabasePath(), effectiveDatabasePath, &startupMoveError)) {

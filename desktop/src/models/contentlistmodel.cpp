@@ -25,6 +25,21 @@ QString firstSentence(const QString &text)
     return normalizedWhitespace(text.section(u'\n', 0, 0));
 }
 
+QString displayTags(const QString &text)
+{
+    const auto tags = text.split(u' ', Qt::SkipEmptyParts);
+    if (tags.isEmpty()) {
+        return {};
+    }
+
+    QStringList formatted;
+    formatted.reserve(tags.size());
+    for (const auto &tag : tags) {
+        formatted.append(QStringLiteral("#") + tag);
+    }
+    return formatted.join(u' ');
+}
+
 } // namespace
 
 ContentListModel::ContentListModel(QObject *parent)
@@ -57,6 +72,10 @@ QVariant ContentListModel::data(const QModelIndex &index, int role) const
         return item.description;
     case DescriptionPreviewRole:
         return descriptionPreview(item.description);
+    case TagsRole:
+        return item.tags;
+    case DisplayTagsRole:
+        return displayTags(item.tags);
     case PillarRole:
         return item.pillarName;
     case SeriesRole:
@@ -89,6 +108,8 @@ QHash<int, QByteArray> ContentListModel::roleNames() const
         {TitleRole, "title"},
         {DescriptionRole, "description"},
         {DescriptionPreviewRole, "descriptionPreview"},
+        {TagsRole, "tags"},
+        {DisplayTagsRole, "displayTags"},
         {PillarRole, "pillar"},
         {SeriesRole, "series"},
         {KindRole, "kind"},

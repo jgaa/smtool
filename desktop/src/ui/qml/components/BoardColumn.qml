@@ -7,6 +7,7 @@ Frame {
 
     required property string columnTitle
     required property string statusKey
+    required property string infoText
     required property var model
     required property var editDialog
     required property var dragLayer
@@ -24,10 +25,66 @@ Frame {
         anchors.fill: parent
         spacing: 8
 
-        Label {
-            text: root.columnTitle
-            font.bold: true
-            font.pixelSize: 16
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 6
+
+            Label {
+                text: root.columnTitle
+                font.bold: true
+                font.pixelSize: 16
+                Layout.fillWidth: true
+            }
+
+            ToolButton {
+                id: infoButton
+                text: "i"
+                font.bold: true
+                onClicked: statusInfoPopup.open()
+            }
+        }
+
+        Popup {
+            id: statusInfoPopup
+            parent: Overlay.overlay
+            anchors.centerIn: Overlay.overlay
+            width: Math.min(parent ? parent.width - 80 : 560, 560)
+            height: Math.min(parent ? parent.height - 80 : 640, 640)
+            modal: true
+            focus: true
+            closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+
+            background: Rectangle {
+                radius: 10
+                color: "white"
+                border.color: "#cfcfcf"
+            }
+
+            contentItem: ColumnLayout {
+                spacing: 12
+
+                Label {
+                    text: root.columnTitle
+                    font.bold: true
+                    font.pixelSize: 18
+                }
+
+                ScrollView {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    clip: true
+
+                    TextEdit {
+                        readOnly: true
+                        selectByMouse: true
+                        wrapMode: TextEdit.Wrap
+                        textFormat: TextEdit.MarkdownText
+                        text: root.infoText
+                        color: "#202020"
+                        width: parent.width
+                    }
+                }
+            }
         }
 
         DropArea {
@@ -52,6 +109,7 @@ Frame {
                     required property string itemId
                     required property string title
                     required property string descriptionPreview
+                    required property string displayTags
                     required property string pillar
                     required property string kind
                     required property string series
@@ -122,6 +180,14 @@ Frame {
                             wrapMode: Text.Wrap
                             color: "#505050"
                             visible: text.length > 0
+                            Layout.fillWidth: true
+                        }
+
+                        Label {
+                            text: displayTags
+                            visible: text.length > 0
+                            wrapMode: Text.Wrap
+                            color: "#2f6f44"
                             Layout.fillWidth: true
                         }
 

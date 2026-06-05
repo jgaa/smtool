@@ -12,27 +12,6 @@ ApplicationWindow {
     visible: true
     title: "SmTool"
 
-    property var boardColumns: [
-        { title: "Inbox", status: "inbox", model: appController.boardInboxModel },
-        { title: "Clarifying", status: "clarifying", model: appController.boardClarifyingModel },
-        { title: "Shaping", status: "shaping", model: appController.boardShapingModel },
-        { title: "Drafting", status: "drafting", model: appController.boardDraftingModel },
-        { title: "Ready", status: "ready", model: appController.boardReadyModel },
-        { title: "Scheduled", status: "scheduled", model: appController.boardScheduledModel },
-        { title: "Published", status: "published", model: appController.boardPublishedModel },
-        { title: "Reviewing", status: "reviewing", model: appController.boardReviewingModel }
-    ]
-    property var contentStatuses: [
-        "inbox",
-        "clarifying",
-        "shaping",
-        "drafting",
-        "ready",
-        "scheduled",
-        "published",
-        "reviewing",
-        "archived"
-    ]
     property var publicationStatuses: [
         "planned",
         "scheduled",
@@ -139,6 +118,12 @@ ApplicationWindow {
         shortcut: StandardKey.Paste
         enabled: appController.clipboardHasText
         onTriggered: appController.pasteClipboardToIdea()
+    }
+
+    Action {
+        id: importFromFileAction
+        text: qsTr("Import from File")
+        onTriggered: appController.importIdeasFromUserSelectedFile()
     }
 
     SettingsDialog {
@@ -294,6 +279,7 @@ ApplicationWindow {
             publicationsModel = []
             inboxTitleField.clear()
             inboxDescriptionField.clear()
+            inboxTagsField.clear()
             priorityBox.value = 0
             scheduledAtSelector.value = ""
             if (statusBox.count > 0) {
@@ -330,6 +316,7 @@ ApplicationWindow {
             editingContentId = item.id
             inboxTitleField.text = item.title
             inboxDescriptionField.text = item.description
+            inboxTagsField.text = item.tags
             priorityBox.value = item.priority
             scheduledAtSelector.value = item.scheduledAt ? item.scheduledAt.slice(0, 10) : ""
 
@@ -393,6 +380,21 @@ ApplicationWindow {
                                 }
                             }
 
+                            RowLayout {
+                                Layout.fillWidth: true
+
+                                Label {
+                                    text: "Tags"
+                                    Layout.preferredWidth: 80
+                                }
+
+                                TextField {
+                                    id: inboxTagsField
+                                    Layout.fillWidth: true
+                                    placeholderText: "#idea product roadmap"
+                                }
+                            }
+
                             GridLayout {
                                 columns: 6
                                 columnSpacing: 12
@@ -442,7 +444,9 @@ ApplicationWindow {
                                 ComboBox {
                                     id: statusBox
                                     Layout.fillWidth: true
-                                    model: window.contentStatuses
+                                    textRole: "displayName"
+                                    valueRole: "statusId"
+                                    model: appController.contentStatusModel
                                 }
                             }
                         }
@@ -573,11 +577,12 @@ ApplicationWindow {
                 onAccepted: {
                     const pillarId = pillarBox.currentIndex >= 0 ? pillarBox.currentValue : ""
                     const channelId = channelBox.currentIndex >= 0 ? channelBox.currentValue : ""
-                    const status = statusBox.currentIndex >= 0 ? statusBox.currentText : "inbox"
+                    const status = statusBox.currentIndex >= 0 ? statusBox.currentValue : "inbox"
                     const ok = quickAddDialog.editingContentId.length > 0
                         ? appController.updateContent(quickAddDialog.editingContentId,
                                                       inboxTitleField.text,
                                                       inboxDescriptionField.text,
+                                                      inboxTagsField.text,
                                                       pillarId,
                                                       priorityBox.value,
                                                       scheduledAtSelector.value,
@@ -585,6 +590,7 @@ ApplicationWindow {
                                                       status)
                         : appController.createInboxItem(inboxTitleField.text,
                                                         inboxDescriptionField.text,
+                                                        inboxTagsField.text,
                                                         pillarId,
                                                         "",
                                                         priorityBox.value,
@@ -821,6 +827,10 @@ ApplicationWindow {
         Menu {
             title: qsTr("&App")
 
+            MenuItem { action: importFromFileAction }
+
+            MenuSeparator {}
+
             MenuItem { action: settingsAction }
 
             MenuSeparator {}
@@ -870,21 +880,20 @@ ApplicationWindow {
         anchors.bottom: parent.bottom
         currentIndex: tabBar.currentIndex
 
-        ScrollView {
-            clip: true
-            contentWidth: availableWidth
-
+        Item {
             ColumnLayout {
-                width: parent.width
+                anchors.fill: parent
+                anchors.margins: 12
                 spacing: 16
 
                 SectionCard {
                     Layout.fillWidth: true
+                    Layout.fillHeight: true
                     title: "Inbox"
 
                     ListView {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: Math.max(420, contentHeight)
+                        Layout.fillHeight: true
                         clip: true
                         model: appController.inboxModel
                         spacing: 8
@@ -896,6 +905,13 @@ ApplicationWindow {
                             metaText: [pillar, kind, suggestedChannel].filter(function(value) { return value.length > 0 }).join(" | ")
                             onEditRequested: quickAddDialog.openForEdit(itemId)
                             onDeleteRequested: deleteContentDialog.openForContent(itemId, title)
+
+                            Label {
+                                text: displayTags
+                                visible: text.length > 0
+                                color: "#2f6f44"
+                                wrapMode: Text.Wrap
+                            }
 
                             RowLayout {
                                 Button {
@@ -989,28 +1005,21 @@ ApplicationWindow {
                         height: boardFlickable.height
 
                         Repeater {
-                            model: window.boardColumns.length
+                            model: appController.contentStatusModel
                             delegate: BoardColumn {
-                                required property int index
-                                property var columnData: window.boardColumns[index]
+                                required property string statusId
+                                required property string displayName
+                                required property string info
 
-                                columnTitle: columnData.title
-                                statusKey: columnData.status
-                                model: columnData.model
+                                visible: statusId !== "archived" || appController.boardShowArchived
+                                columnTitle: displayName
+                                statusKey: statusId
+                                infoText: info
+                                model: appController.boardModelForStatus(statusId)
                                 editDialog: quickAddDialog
                                 dragLayer: window.contentItem
                                 height: boardFlickable.height
                             }
-                        }
-
-                        BoardColumn {
-                            visible: appController.boardShowArchived
-                            columnTitle: "Archived"
-                            statusKey: "archived"
-                            model: appController.boardArchivedModel
-                            editDialog: quickAddDialog
-                            dragLayer: window.contentItem
-                            height: boardFlickable.height
                         }
                     }
                 }
@@ -1216,6 +1225,7 @@ ApplicationWindow {
                             delegate: ContentSummaryCard {
                                 required property string itemId
                                 required property string title
+                                required property string displayTags
                                 required property string kind
                                 required property string series
                                 required property string status
@@ -1228,6 +1238,13 @@ ApplicationWindow {
                                 onClicked: appController.currentSourceId = itemId
                                 onEditRequested: quickAddDialog.openForEdit(itemId)
                                 onDeleteRequested: deleteContentDialog.openForContent(itemId, title)
+
+                                Label {
+                                    text: displayTags
+                                    visible: text.length > 0
+                                    color: "#2f6f44"
+                                    wrapMode: Text.Wrap
+                                }
                             }
                         }
 
@@ -1252,11 +1269,19 @@ ApplicationWindow {
                         spacing: 8
 
                         delegate: ContentSummaryCard {
+                            required property string displayTags
                             width: ListView.view.width
                             titleText: title
                             metaText: [kind, outcome, suggestedChannel, status].filter(function(value) { return value.length > 0 }).join(" | ")
                             onEditRequested: quickAddDialog.openForEdit(itemId)
                             onDeleteRequested: deleteContentDialog.openForContent(itemId, title)
+
+                            Label {
+                                text: displayTags
+                                visible: text.length > 0
+                                color: "#2f6f44"
+                                wrapMode: Text.Wrap
+                            }
 
                             Label {
                                 text: "Template: " + burstTemplateKey
