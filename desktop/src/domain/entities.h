@@ -80,6 +80,7 @@ struct ContentSummary {
     int priority = 0;
     QDateTime scheduledAt;
     QDateTime publishedAt;
+    QDateTime firstPublicationAt;
 };
 
 struct Publication {

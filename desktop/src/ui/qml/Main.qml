@@ -11,11 +11,57 @@ ApplicationWindow {
     height: 960
     visible: true
     title: "SmTool"
+    header: ToolBar {
+        RowLayout {
+            anchors.fill: parent
+            anchors.margins: 8
+            spacing: 8
+
+            Label {
+                text: "Search"
+            }
+
+            TextField {
+                id: searchField
+                Layout.fillWidth: true
+                enabled: tabBar.currentIndex !== 6
+                placeholderText: enabled ? "title, description, #tag, t:..., d:..." : "Search disabled on Dashboard"
+                onTextEdited: appController.searchQuery = text
+            }
+
+            ToolButton {
+                text: "x"
+                enabled: searchField.enabled && appController.searchQuery.length > 0
+                visible: appController.searchQuery.length > 0
+                onClicked: appController.clearSearchQuery()
+            }
+        }
+    }
+
+    Connections {
+        target: appController
+
+        function onSearchQueryChanged() {
+            if (searchField.text !== appController.searchQuery) {
+                searchField.text = appController.searchQuery
+            }
+        }
+    }
 
     property var publicationStatuses: [
         "planned",
         "scheduled",
         "published"
+    ]
+    property var allContentSortOptions: [
+        { label: "Due Date / Alphabetically", mode: 0 },
+        { label: "Alphabetically", mode: 1 },
+        { label: "Status / Alphabetically", mode: 2 },
+        { label: "Status / Due Date", mode: 3 },
+        { label: "Status / First Publish Date", mode: 4 },
+        { label: "Pillar / Alphabetically", mode: 5 },
+        { label: "Pillar / Due Date", mode: 6 },
+        { label: "Pillar / First Publish Date", mode: 7 }
     ]
     property string activeSelectedText: {
         const item = window.activeFocusItem
@@ -870,6 +916,7 @@ ApplicationWindow {
         TabButton { text: "Calendar" }
         TabButton { text: "Sources" }
         TabButton { text: "Series" }
+        TabButton { text: "All Content" }
         TabButton { text: "Dashboard" }
     }
 
@@ -897,6 +944,21 @@ ApplicationWindow {
                         clip: true
                         model: appController.inboxModel
                         spacing: 8
+                        ScrollBar.vertical: ScrollBar {
+                            policy: ScrollBar.AsNeeded
+                            width: 18
+
+                            contentItem: Rectangle {
+                                implicitWidth: 18
+                                radius: 9
+                                color: parent.pressed ? "#8f8f8f" : "#a7a7a7"
+                            }
+
+                            background: Rectangle {
+                                radius: 9
+                                color: "#ececec"
+                            }
+                        }
 
                         delegate: ContentSummaryCard {
                             width: ListView.view.width
@@ -1221,6 +1283,21 @@ ApplicationWindow {
                             clip: true
                             model: appController.sourceModel
                             spacing: 8
+                            ScrollBar.vertical: ScrollBar {
+                                policy: ScrollBar.AsNeeded
+                                width: 18
+
+                                contentItem: Rectangle {
+                                    implicitWidth: 18
+                                    radius: 9
+                                    color: parent.pressed ? "#8f8f8f" : "#a7a7a7"
+                                }
+
+                                background: Rectangle {
+                                    radius: 9
+                                    color: "#ececec"
+                                }
+                            }
 
                             delegate: ContentSummaryCard {
                                 required property string itemId
@@ -1267,6 +1344,21 @@ ApplicationWindow {
                         clip: true
                         model: appController.derivativeModel
                         spacing: 8
+                        ScrollBar.vertical: ScrollBar {
+                            policy: ScrollBar.AsNeeded
+                            width: 18
+
+                            contentItem: Rectangle {
+                                implicitWidth: 18
+                                radius: 9
+                                color: parent.pressed ? "#8f8f8f" : "#a7a7a7"
+                            }
+
+                            background: Rectangle {
+                                radius: 9
+                                color: "#ececec"
+                            }
+                        }
 
                         delegate: ContentSummaryCard {
                             required property string displayTags
@@ -1312,6 +1404,21 @@ ApplicationWindow {
                         clip: true
                         model: appController.seriesModel
                         spacing: 8
+                        ScrollBar.vertical: ScrollBar {
+                            policy: ScrollBar.AsNeeded
+                            width: 18
+
+                            contentItem: Rectangle {
+                                implicitWidth: 18
+                                radius: 9
+                                color: parent.pressed ? "#8f8f8f" : "#a7a7a7"
+                            }
+
+                            background: Rectangle {
+                                radius: 9
+                                color: "#ececec"
+                            }
+                        }
 
                         delegate: Rectangle {
                             width: ListView.view.width
@@ -1370,6 +1477,97 @@ ApplicationWindow {
             }
         }
 
+        Item {
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 12
+                spacing: 12
+
+                RowLayout {
+                    Layout.fillWidth: true
+
+                    Switch {
+                        text: "Show archived"
+                        checked: appController.allContentShowArchived
+                        onToggled: appController.allContentShowArchived = checked
+                    }
+
+                    Label {
+                        text: "Sort"
+                    }
+
+                    ComboBox {
+                        id: allContentSortBox
+                        Layout.preferredWidth: 260
+                        model: window.allContentSortOptions
+                        textRole: "label"
+                        valueRole: "mode"
+                        Component.onCompleted: currentIndex = appController.allContentSortMode()
+                        onActivated: appController.setAllContentSortMode(currentValue)
+                    }
+
+                    Item {
+                        Layout.fillWidth: true
+                    }
+                }
+
+                SectionCard {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    title: "All Content"
+
+                    ListView {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        clip: true
+                        model: appController.allContentModel
+                        spacing: 8
+                        ScrollBar.vertical: ScrollBar {
+                            policy: ScrollBar.AsNeeded
+                            width: 18
+
+                            contentItem: Rectangle {
+                                implicitWidth: 18
+                                radius: 9
+                                color: parent.pressed ? "#8f8f8f" : "#a7a7a7"
+                            }
+
+                            background: Rectangle {
+                                radius: 9
+                                color: "#ececec"
+                            }
+                        }
+
+                        delegate: ContentSummaryCard {
+                            required property string itemId
+                            required property string title
+                            required property string description
+                            required property string displayTags
+                            required property string pillar
+                            required property string kind
+                            required property string status
+                            required property string series
+                            required property string suggestedChannel
+
+                            width: ListView.view.width
+                            titleText: title
+                            bodyText: description
+                            metaText: [pillar, kind, status, series, suggestedChannel].filter(function(value) { return value.length > 0 }).join(" | ")
+                            onEditRequested: quickAddDialog.openForEdit(itemId)
+                            onDeleteRequested: deleteContentDialog.openForContent(itemId, title)
+
+                            Label {
+                                text: displayTags
+                                visible: text.length > 0
+                                color: "#2f6f44"
+                                wrapMode: Text.Wrap
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         ScrollView {
             clip: true
             contentWidth: availableWidth
@@ -1390,6 +1588,21 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 180
                         model: appController.dashboardByPillarModel
+                        ScrollBar.vertical: ScrollBar {
+                            policy: ScrollBar.AsNeeded
+                            width: 18
+
+                            contentItem: Rectangle {
+                                implicitWidth: 18
+                                radius: 9
+                                color: parent.pressed ? "#8f8f8f" : "#a7a7a7"
+                            }
+
+                            background: Rectangle {
+                                radius: 9
+                                color: "#ececec"
+                            }
+                        }
                         delegate: Label { text: label + ": " + value }
                     }
                 }
@@ -1400,6 +1613,21 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 180
                         model: appController.dashboardBySeriesModel
+                        ScrollBar.vertical: ScrollBar {
+                            policy: ScrollBar.AsNeeded
+                            width: 18
+
+                            contentItem: Rectangle {
+                                implicitWidth: 18
+                                radius: 9
+                                color: parent.pressed ? "#8f8f8f" : "#a7a7a7"
+                            }
+
+                            background: Rectangle {
+                                radius: 9
+                                color: "#ececec"
+                            }
+                        }
                         delegate: Label { text: label + ": " + value + (secondary.length ? " | " + secondary : "") }
                     }
                 }
@@ -1410,6 +1638,21 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 180
                         model: appController.dashboardByStatusModel
+                        ScrollBar.vertical: ScrollBar {
+                            policy: ScrollBar.AsNeeded
+                            width: 18
+
+                            contentItem: Rectangle {
+                                implicitWidth: 18
+                                radius: 9
+                                color: parent.pressed ? "#8f8f8f" : "#a7a7a7"
+                            }
+
+                            background: Rectangle {
+                                radius: 9
+                                color: "#ececec"
+                            }
+                        }
                         delegate: Label { text: label + ": " + value }
                     }
                 }
@@ -1420,6 +1663,21 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 200
                         model: appController.dashboardUpcomingModel
+                        ScrollBar.vertical: ScrollBar {
+                            policy: ScrollBar.AsNeeded
+                            width: 18
+
+                            contentItem: Rectangle {
+                                implicitWidth: 18
+                                radius: 9
+                                color: parent.pressed ? "#8f8f8f" : "#a7a7a7"
+                            }
+
+                            background: Rectangle {
+                                radius: 9
+                                color: "#ececec"
+                            }
+                        }
                         delegate: Label { text: label + " | " + secondary }
                     }
                 }
@@ -1430,6 +1688,21 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 200
                         model: appController.dashboardPublishedContentModel
+                        ScrollBar.vertical: ScrollBar {
+                            policy: ScrollBar.AsNeeded
+                            width: 18
+
+                            contentItem: Rectangle {
+                                implicitWidth: 18
+                                radius: 9
+                                color: parent.pressed ? "#8f8f8f" : "#a7a7a7"
+                            }
+
+                            background: Rectangle {
+                                radius: 9
+                                color: "#ececec"
+                            }
+                        }
                         delegate: Label { text: label + " | " + secondary }
                     }
                 }
@@ -1440,6 +1713,21 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 200
                         model: appController.dashboardPublishedPublicationsModel
+                        ScrollBar.vertical: ScrollBar {
+                            policy: ScrollBar.AsNeeded
+                            width: 18
+
+                            contentItem: Rectangle {
+                                implicitWidth: 18
+                                radius: 9
+                                color: parent.pressed ? "#8f8f8f" : "#a7a7a7"
+                            }
+
+                            background: Rectangle {
+                                radius: 9
+                                color: "#ececec"
+                            }
+                        }
                         delegate: Label { text: label + " | " + secondary }
                     }
                 }
@@ -1450,6 +1738,21 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 180
                         model: appController.dashboardZeroPublishedPillarsModel
+                        ScrollBar.vertical: ScrollBar {
+                            policy: ScrollBar.AsNeeded
+                            width: 18
+
+                            contentItem: Rectangle {
+                                implicitWidth: 18
+                                radius: 9
+                                color: parent.pressed ? "#8f8f8f" : "#a7a7a7"
+                            }
+
+                            background: Rectangle {
+                                radius: 9
+                                color: "#ececec"
+                            }
+                        }
                         delegate: Label { text: label + (secondary.length ? " | " + secondary : "") }
                     }
                 }

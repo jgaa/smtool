@@ -65,6 +65,78 @@ QString joinedTags(const QStringList &tags)
     return tags.isEmpty() ? QStringLiteral("") : tags.join(u' ');
 }
 
+struct SearchTerms {
+    enum class Scope {
+        AllText,
+        TitleOnly,
+        DescriptionOnly,
+    };
+
+    Scope scope = Scope::AllText;
+    QStringList textTerms;
+    QStringList tagTerms;
+};
+
+SearchTerms parseSearchQuery(QString searchQuery)
+{
+    SearchTerms parsed;
+    auto trimmed = searchQuery.trimmed();
+    if (trimmed.startsWith(QStringLiteral("t:"), Qt::CaseInsensitive)) {
+        parsed.scope = SearchTerms::Scope::TitleOnly;
+        trimmed.remove(0, 2);
+    } else if (trimmed.startsWith(QStringLiteral("title:"), Qt::CaseInsensitive)) {
+        parsed.scope = SearchTerms::Scope::TitleOnly;
+        trimmed.remove(0, 6);
+    } else if (trimmed.startsWith(QStringLiteral("d:"), Qt::CaseInsensitive)) {
+        parsed.scope = SearchTerms::Scope::DescriptionOnly;
+        trimmed.remove(0, 2);
+    } else if (trimmed.startsWith(QStringLiteral("description:"), Qt::CaseInsensitive)) {
+        parsed.scope = SearchTerms::Scope::DescriptionOnly;
+        trimmed.remove(0, 12);
+    }
+
+    for (const auto &token : trimmed.split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts)) {
+        if (token.startsWith(u'#')) {
+            const auto normalized = normalizeTagToken(token);
+            if (!normalized.isEmpty()) {
+                parsed.tagTerms.append(normalized);
+            }
+            continue;
+        }
+
+        parsed.textTerms.append(token.toLower());
+    }
+    return parsed;
+}
+
+bool containsAllTerms(const QString &haystack, const QStringList &terms)
+{
+    const auto lowered = haystack.toLower();
+    return std::ranges::all_of(terms, [&](const auto &term) { return lowered.contains(term); });
+}
+
+bool matchesSearch(const Domain::ContentSummary &item, const SearchTerms &search)
+{
+    if (search.textTerms.isEmpty() && search.tagTerms.isEmpty()) {
+        return true;
+    }
+
+    const auto tagSet = item.tags.split(u' ', Qt::SkipEmptyParts);
+    if (!std::ranges::all_of(search.tagTerms, [&](const auto &tag) { return tagSet.contains(tag); })) {
+        return false;
+    }
+
+    switch (search.scope) {
+    case SearchTerms::Scope::TitleOnly:
+        return containsAllTerms(item.title, search.textTerms);
+    case SearchTerms::Scope::DescriptionOnly:
+        return containsAllTerms(item.description, search.textTerms);
+    case SearchTerms::Scope::AllText:
+    default:
+        return containsAllTerms(item.title + u' ' + item.description, search.textTerms);
+    }
+}
+
 bool execWithError(QSqlQuery &query, QString *errorMessage)
 {
     if (query.exec()) {
@@ -162,7 +234,8 @@ QString selectSummaryBase()
     return QStringLiteral(
         "SELECT c.id, COALESCE(c.parent_id, ''), COALESCE(c.burst_template_key, ''), c.title, COALESCE(c.description, ''), "
         "COALESCE(c.tags_cache, ''), COALESCE(p.display_name, ''), COALESCE(s.name, ''), COALESCE(k.display_name, ''), COALESCE(o.display_name, ''), "
-        "COALESCE(ch.display_name, ''), c.status, c.priority, c.scheduled_at, c.published_at "
+        "COALESCE(ch.display_name, ''), c.status, c.priority, c.scheduled_at, c.published_at, "
+        "(SELECT MIN(pub.published_at) FROM publication pub WHERE pub.content_id = c.id AND pub.published_at IS NOT NULL) "
         "FROM content c "
         "LEFT JOIN pillar p ON p.id = c.pillar_id "
         "LEFT JOIN series s ON s.id = c.series_id "
@@ -178,17 +251,17 @@ ContentRepository::ContentRepository(QSqlDatabase database)
 {
 }
 
-std::vector<Domain::ContentSummary> ContentRepository::inboxItems() const
+std::vector<Domain::ContentSummary> ContentRepository::inboxItems(const QString &searchQuery) const
 {
     QSqlQuery query{database_};
     query.prepare(selectSummaryBase() + QStringLiteral(
                       "WHERE c.status = 'inbox' "
                       "ORDER BY c.priority DESC, c.created_at DESC"));
     query.exec();
-    return runSummaryQuery(query);
+    return filteredItems(runSummaryQuery(query), searchQuery);
 }
 
-std::vector<Domain::ContentSummary> ContentRepository::boardItems(const QString &status, bool includeArchived) const
+std::vector<Domain::ContentSummary> ContentRepository::boardItems(const QString &status, bool includeArchived, const QString &searchQuery) const
 {
     if (!contentStatusExists(database_, status)) {
         return {};
@@ -207,10 +280,10 @@ std::vector<Domain::ContentSummary> ContentRepository::boardItems(const QString 
         query.bindValue(":status"_L1, status);
     }
     query.exec();
-    return runSummaryQuery(query);
+    return filteredItems(runSummaryQuery(query), searchQuery);
 }
 
-std::vector<Domain::ContentSummary> ContentRepository::rootItems(bool includeArchived) const
+std::vector<Domain::ContentSummary> ContentRepository::rootItems(bool includeArchived, const QString &searchQuery) const
 {
     QSqlQuery query{database_};
     query.prepare(selectSummaryBase() + QStringLiteral(
@@ -218,10 +291,73 @@ std::vector<Domain::ContentSummary> ContentRepository::rootItems(bool includeArc
                       "ORDER BY c.updated_at DESC, c.title ASC"));
     query.bindValue(":include_archived"_L1, includeArchived ? 1 : 0);
     query.exec();
-    return runSummaryQuery(query);
+    return filteredItems(runSummaryQuery(query), searchQuery);
 }
 
-std::vector<Domain::ContentSummary> ContentRepository::childItems(const QString &parentId) const
+std::vector<Domain::ContentSummary> ContentRepository::allItems(bool includeArchived, SortMode sortMode, const QString &searchQuery) const
+{
+    QSqlQuery query{database_};
+    query.prepare(selectSummaryBase() + QStringLiteral(
+                      "WHERE (:include_archived = 1 OR c.status != 'archived')"));
+    query.bindValue(":include_archived"_L1, includeArchived ? 1 : 0);
+    query.exec();
+
+    auto results = filteredItems(runSummaryQuery(query), searchQuery);
+    const auto compareText = [](const QString &left, const QString &right) {
+        return QString::compare(left, right, Qt::CaseInsensitive) < 0;
+    };
+    const auto compareDate = [&](const QDateTime &left, const QDateTime &right, const QString &leftTitle, const QString &rightTitle) {
+        const auto leftValid = left.isValid();
+        const auto rightValid = right.isValid();
+        if (leftValid != rightValid) {
+            return leftValid;
+        }
+        if (leftValid && rightValid) {
+            if (left != right) {
+                return left < right;
+            }
+        }
+        return compareText(leftTitle, rightTitle);
+    };
+
+    std::ranges::sort(results, [&](const auto &left, const auto &right) {
+        switch (sortMode) {
+        case SortMode::Alphabetical:
+            return compareText(left.title, right.title);
+        case SortMode::StatusAlphabetical:
+            return left.status == right.status ? compareText(left.title, right.title)
+                                               : compareText(left.status, right.status);
+        case SortMode::StatusDueDate:
+            return left.status == right.status ? compareDate(left.scheduledAt, right.scheduledAt, left.title, right.title)
+                                               : compareText(left.status, right.status);
+        case SortMode::StatusFirstPublishDate: {
+            const auto leftDate = left.firstPublicationAt.isValid() ? left.firstPublicationAt : left.publishedAt;
+            const auto rightDate = right.firstPublicationAt.isValid() ? right.firstPublicationAt : right.publishedAt;
+            return left.status == right.status ? compareDate(leftDate, rightDate, left.title, right.title)
+                                               : compareText(left.status, right.status);
+        }
+        case SortMode::PillarAlphabetical:
+            return left.pillarName == right.pillarName ? compareText(left.title, right.title)
+                                                       : compareText(left.pillarName, right.pillarName);
+        case SortMode::PillarDueDate:
+            return left.pillarName == right.pillarName ? compareDate(left.scheduledAt, right.scheduledAt, left.title, right.title)
+                                                       : compareText(left.pillarName, right.pillarName);
+        case SortMode::PillarFirstPublishDate: {
+            const auto leftDate = left.firstPublicationAt.isValid() ? left.firstPublicationAt : left.publishedAt;
+            const auto rightDate = right.firstPublicationAt.isValid() ? right.firstPublicationAt : right.publishedAt;
+            return left.pillarName == right.pillarName ? compareDate(leftDate, rightDate, left.title, right.title)
+                                                       : compareText(left.pillarName, right.pillarName);
+        }
+        case SortMode::DueDateAlphabetical:
+        default:
+            return compareDate(left.scheduledAt, right.scheduledAt, left.title, right.title);
+        }
+    });
+
+    return results;
+}
+
+std::vector<Domain::ContentSummary> ContentRepository::childItems(const QString &parentId, const QString &searchQuery) const
 {
     QSqlQuery query{database_};
     query.prepare(selectSummaryBase() + QStringLiteral(
@@ -229,7 +365,7 @@ std::vector<Domain::ContentSummary> ContentRepository::childItems(const QString 
                       "ORDER BY c.created_at ASC"));
     query.bindValue(":parent_id"_L1, parentId);
     query.exec();
-    return runSummaryQuery(query);
+    return filteredItems(runSummaryQuery(query), searchQuery);
 }
 
 std::vector<Domain::BurstTemplate> ContentRepository::activeBurstTemplates() const
@@ -597,6 +733,23 @@ Domain::ContentItem ContentRepository::getById(const QString &id) const
     return getContentById(id);
 }
 
+std::vector<Domain::ContentSummary> ContentRepository::filteredItems(std::vector<Domain::ContentSummary> items,
+                                                                     const QString &searchQuery) const
+{
+    const auto parsed = parseSearchQuery(searchQuery);
+    if (parsed.textTerms.isEmpty() && parsed.tagTerms.isEmpty()) {
+        return items;
+    }
+
+    std::vector<Domain::ContentSummary> results;
+    for (const auto &item : items) {
+        if (matchesSearch(item, parsed)) {
+            results.push_back(item);
+        }
+    }
+    return results;
+}
+
 std::vector<Domain::ContentSummary> ContentRepository::runSummaryQuery(QSqlQuery &query) const
 {
     std::vector<Domain::ContentSummary> results;
@@ -617,6 +770,7 @@ std::vector<Domain::ContentSummary> ContentRepository::runSummaryQuery(QSqlQuery
             .priority = query.value(12).toInt(),
             .scheduledAt = query.value(13).toDateTime(),
             .publishedAt = query.value(14).toDateTime(),
+            .firstPublicationAt = query.value(15).toDateTime(),
         });
     }
     return results;

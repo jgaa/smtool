@@ -182,6 +182,7 @@ void AppController::setDescriptionPreviewWordCap(int value)
         Q_UNUSED(statusId);
         model->setDescriptionPreviewWordCap(value);
     }
+    allContentModel_.setDescriptionPreviewWordCap(value);
     sourceModel_.setDescriptionPreviewWordCap(value);
     derivativeModel_.setDescriptionPreviewWordCap(value);
 }
@@ -189,6 +190,7 @@ void AppController::setDescriptionPreviewWordCap(int value)
 Models::ContentListModel *AppController::inboxModel() { return &inboxModel_; }
 Models::ContentStatusListModel *AppController::contentStatusModel() { return &contentStatusModel_; }
 Models::CalendarEntryModel *AppController::calendarModel() { return &calendarModel_; }
+Models::ContentListModel *AppController::allContentModel() { return &allContentModel_; }
 Models::ContentListModel *AppController::sourceModel() { return &sourceModel_; }
 Models::ContentListModel *AppController::derivativeModel() { return &derivativeModel_; }
 Models::SeriesListModel *AppController::seriesModel() { return &seriesModel_; }
@@ -213,6 +215,18 @@ void AppController::setBoardShowArchived(bool enabled)
     boardShowArchived_ = enabled;
     refreshBoard();
     emit boardShowArchivedChanged();
+}
+
+bool AppController::allContentShowArchived() const { return allContentShowArchived_; }
+
+void AppController::setAllContentShowArchived(bool enabled)
+{
+    if (allContentShowArchived_ == enabled) {
+        return;
+    }
+    allContentShowArchived_ = enabled;
+    refreshAllContent();
+    emit allContentShowArchivedChanged();
 }
 
 bool AppController::dashboardIncludeArchived() const { return dashboardIncludeArchived_; }
@@ -265,12 +279,46 @@ void AppController::setCurrentSourceId(const QString &id)
     emit currentSourceIdChanged();
 }
 
+QString AppController::searchQuery() const { return searchQuery_; }
+
+void AppController::setSearchQuery(const QString &value)
+{
+    const auto normalized = value;
+    if (searchQuery_ == normalized) {
+        return;
+    }
+    searchQuery_ = normalized;
+    refreshAll();
+    emit searchQueryChanged();
+}
+
 QString AppController::statusMessage() const { return statusMessage_; }
+
+int AppController::allContentSortMode() const
+{
+    return static_cast<int>(allContentSortMode_);
+}
+
+void AppController::setAllContentSortMode(int mode)
+{
+    const auto normalized = static_cast<Data::ContentRepository::SortMode>(mode);
+    if (allContentSortMode_ == normalized) {
+        return;
+    }
+    allContentSortMode_ = normalized;
+    refreshAllContent();
+}
+
+void AppController::clearSearchQuery()
+{
+    setSearchQuery(QString{});
+}
 
 bool AppController::refreshAll()
 {
     loadLookupModels();
     refreshInbox();
+    refreshAllContent();
     refreshBoard();
     refreshCalendar();
     refreshSources();
@@ -819,7 +867,12 @@ void AppController::syncContentStatusModels()
 
 void AppController::refreshInbox()
 {
-    inboxModel_.setItems(contentRepository_->inboxItems());
+    inboxModel_.setItems(contentRepository_->inboxItems(searchQuery_));
+}
+
+void AppController::refreshAllContent()
+{
+    allContentModel_.setItems(contentRepository_->allItems(allContentShowArchived_, allContentSortMode_, searchQuery_));
 }
 
 void AppController::refreshBoard()
@@ -829,18 +882,18 @@ void AppController::refreshBoard()
         if (it == boardModels_.end()) {
             continue;
         }
-        it->second->setItems(contentRepository_->boardItems(status.id, boardShowArchived_));
+        it->second->setItems(contentRepository_->boardItems(status.id, boardShowArchived_, searchQuery_));
     }
 }
 
 void AppController::refreshCalendar()
 {
-    calendarModel_.setItems(dashboardRepository_->calendarEntries(calendarIncludeArchived_, calendarIncludePublished_));
+    calendarModel_.setItems(dashboardRepository_->calendarEntries(calendarIncludeArchived_, calendarIncludePublished_, searchQuery_));
 }
 
 void AppController::refreshSources()
 {
-    sourceModel_.setItems(contentRepository_->rootItems(boardShowArchived_));
+    sourceModel_.setItems(contentRepository_->rootItems(boardShowArchived_, searchQuery_));
     if (currentSourceId_.isEmpty() && sourceModel_.rowCount() > 0) {
         currentSourceId_ = sourceModel_.data(sourceModel_.index(0, 0), Models::ContentListModel::IdRole).toString();
         emit currentSourceIdChanged();
@@ -850,12 +903,12 @@ void AppController::refreshSources()
 void AppController::refreshDerivatives()
 {
     derivativeModel_.setItems(currentSourceId_.isEmpty() ? std::vector<Domain::ContentSummary>{}
-                                                         : contentRepository_->childItems(currentSourceId_));
+                                                         : contentRepository_->childItems(currentSourceId_, searchQuery_));
 }
 
 void AppController::refreshSeries()
 {
-    seriesModel_.setItems(seriesRepository_->list(boardShowArchived_));
+    seriesModel_.setItems(seriesRepository_->list(boardShowArchived_, searchQuery_));
 }
 
 void AppController::refreshDashboard()

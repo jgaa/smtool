@@ -27,6 +27,7 @@ class AppController : public QObject
     Q_PROPERTY(SmTool::Models::ContentListModel *inboxModel READ inboxModel CONSTANT)
     Q_PROPERTY(SmTool::Models::ContentStatusListModel *contentStatusModel READ contentStatusModel CONSTANT)
     Q_PROPERTY(SmTool::Models::CalendarEntryModel *calendarModel READ calendarModel CONSTANT)
+    Q_PROPERTY(SmTool::Models::ContentListModel *allContentModel READ allContentModel CONSTANT)
     Q_PROPERTY(SmTool::Models::ContentListModel *sourceModel READ sourceModel CONSTANT)
     Q_PROPERTY(SmTool::Models::ContentListModel *derivativeModel READ derivativeModel CONSTANT)
     Q_PROPERTY(SmTool::Models::SeriesListModel *seriesModel READ seriesModel CONSTANT)
@@ -41,11 +42,13 @@ class AppController : public QObject
     Q_PROPERTY(SmTool::Models::DashboardMetricModel *dashboardPublishedPublicationsModel READ dashboardPublishedPublicationsModel CONSTANT)
     Q_PROPERTY(SmTool::Models::DashboardMetricModel *dashboardZeroPublishedPillarsModel READ dashboardZeroPublishedPillarsModel CONSTANT)
     Q_PROPERTY(bool boardShowArchived READ boardShowArchived WRITE setBoardShowArchived NOTIFY boardShowArchivedChanged)
+    Q_PROPERTY(bool allContentShowArchived READ allContentShowArchived WRITE setAllContentShowArchived NOTIFY allContentShowArchivedChanged)
     Q_PROPERTY(bool dashboardIncludeArchived READ dashboardIncludeArchived WRITE setDashboardIncludeArchived NOTIFY dashboardIncludeArchivedChanged)
     Q_PROPERTY(bool calendarIncludeArchived READ calendarIncludeArchived WRITE setCalendarIncludeArchived NOTIFY calendarIncludeArchivedChanged)
     Q_PROPERTY(bool calendarIncludePublished READ calendarIncludePublished WRITE setCalendarIncludePublished NOTIFY calendarIncludePublishedChanged)
     Q_PROPERTY(bool clipboardHasText READ clipboardHasText NOTIFY clipboardHasTextChanged)
     Q_PROPERTY(QString currentSourceId READ currentSourceId WRITE setCurrentSourceId NOTIFY currentSourceIdChanged)
+    Q_PROPERTY(QString searchQuery READ searchQuery WRITE setSearchQuery NOTIFY searchQueryChanged)
     Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY statusMessageChanged)
 
 public:
@@ -57,6 +60,7 @@ public:
     [[nodiscard]] Models::ContentListModel *inboxModel();
     [[nodiscard]] Models::ContentStatusListModel *contentStatusModel();
     [[nodiscard]] Models::CalendarEntryModel *calendarModel();
+    [[nodiscard]] Models::ContentListModel *allContentModel();
     [[nodiscard]] Models::ContentListModel *sourceModel();
     [[nodiscard]] Models::ContentListModel *derivativeModel();
     [[nodiscard]] Models::SeriesListModel *seriesModel();
@@ -74,6 +78,9 @@ public:
     [[nodiscard]] bool boardShowArchived() const;
     void setBoardShowArchived(bool enabled);
 
+    [[nodiscard]] bool allContentShowArchived() const;
+    void setAllContentShowArchived(bool enabled);
+
     [[nodiscard]] bool dashboardIncludeArchived() const;
     void setDashboardIncludeArchived(bool enabled);
 
@@ -88,7 +95,13 @@ public:
     [[nodiscard]] QString currentSourceId() const;
     void setCurrentSourceId(const QString &id);
 
+    [[nodiscard]] QString searchQuery() const;
+    void setSearchQuery(const QString &value);
+
     [[nodiscard]] QString statusMessage() const;
+    Q_INVOKABLE int allContentSortMode() const;
+    Q_INVOKABLE void setAllContentSortMode(int mode);
+    Q_INVOKABLE void clearSearchQuery();
 
     Q_INVOKABLE bool refreshAll();
     Q_INVOKABLE bool applyDatabasePath(const QString &path);
@@ -133,11 +146,13 @@ public:
 
 signals:
     void boardShowArchivedChanged();
+    void allContentShowArchivedChanged();
     void dashboardIncludeArchivedChanged();
     void calendarIncludeArchivedChanged();
     void calendarIncludePublishedChanged();
     void clipboardHasTextChanged();
     void currentSourceIdChanged();
+    void searchQueryChanged();
     void statusMessageChanged();
 
 private:
@@ -146,6 +161,7 @@ private:
     void loadLookupModels();
     void syncContentStatusModels();
     void refreshInbox();
+    void refreshAllContent();
     void refreshBoard();
     void refreshCalendar();
     void refreshSources();
@@ -166,6 +182,7 @@ private:
     Models::ContentListModel inboxModel_;
     Models::ContentStatusListModel contentStatusModel_;
     Models::CalendarEntryModel calendarModel_;
+    Models::ContentListModel allContentModel_;
     Models::ContentListModel sourceModel_;
     Models::ContentListModel derivativeModel_;
     Models::SeriesListModel seriesModel_;
@@ -181,13 +198,16 @@ private:
     Models::DashboardMetricModel dashboardZeroPublishedPillarsModel_;
 
     bool boardShowArchived_ = false;
+    bool allContentShowArchived_ = false;
     bool dashboardIncludeArchived_ = false;
     bool calendarIncludeArchived_ = false;
     bool calendarIncludePublished_ = false;
     bool clipboardHasText_ = false;
     QString currentSourceId_;
+    QString searchQuery_;
     QString statusMessage_;
     int descriptionPreviewWordCap_ = 20;
+    Data::ContentRepository::SortMode allContentSortMode_ = Data::ContentRepository::SortMode::DueDateAlphabetical;
     std::map<QString, std::unique_ptr<Models::ContentListModel>> boardModels_;
 };
 

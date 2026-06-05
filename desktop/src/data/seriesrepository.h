@@ -13,7 +13,7 @@ class SeriesRepository
 public:
     explicit SeriesRepository(QSqlDatabase database);
 
-    [[nodiscard]] std::vector<Domain::SeriesSummary> list(bool includeArchived) const;
+    [[nodiscard]] std::vector<Domain::SeriesSummary> list(bool includeArchived, const QString &searchQuery = {}) const;
     [[nodiscard]] QString create(const QString &name,
                                  const QString &description,
                                  const QString &pillarId,

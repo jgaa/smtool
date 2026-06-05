@@ -103,6 +103,21 @@ Frame {
                 clip: true
                 model: root.model
                 spacing: 8
+                ScrollBar.vertical: ScrollBar {
+                    policy: ScrollBar.AsNeeded
+                    width: 18
+
+                    contentItem: Rectangle {
+                        implicitWidth: 18
+                        radius: 9
+                        color: parent.pressed ? "#8f8f8f" : "#a7a7a7"
+                    }
+
+                    background: Rectangle {
+                        radius: 9
+                        color: "#ececec"
+                    }
+                }
 
                 delegate: Rectangle {
                     id: cardRoot
