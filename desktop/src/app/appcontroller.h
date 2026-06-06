@@ -124,6 +124,7 @@ public:
                                    const QString &title,
                                    const QString &description,
                                    const QString &tags,
+                                   const QString &kindId,
                                    const QString &pillarId,
                                    int priority,
                                    const QString &scheduledAt,

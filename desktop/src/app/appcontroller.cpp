@@ -613,6 +613,7 @@ QVariantMap AppController::contentDetails(const QString &contentId) const
         {QStringLiteral("title"), item.title},
         {QStringLiteral("description"), item.description},
         {QStringLiteral("tags"), item.tags},
+        {QStringLiteral("kindId"), item.kindId},
         {QStringLiteral("pillarId"), item.pillarId},
         {QStringLiteral("priority"), item.priority},
         {QStringLiteral("scheduledAt"), item.scheduledAt.isValid() ? item.scheduledAt.toString(Qt::ISODate) : QString{}},
@@ -666,6 +667,7 @@ bool AppController::updateContent(const QString &contentId,
                                   const QString &title,
                                   const QString &description,
                                   const QString &tags,
+                                  const QString &kindId,
                                   const QString &pillarId,
                                   int priority,
                                   const QString &scheduledAt,
@@ -710,6 +712,7 @@ bool AppController::updateContent(const QString &contentId,
     updated.title = title.trimmed();
     updated.description = description.trimmed();
     updated.tags = tags;
+    updated.kindId = kindId.trimmed().isEmpty() ? existing.kindId : kindId;
     updated.pillarId = pillarId;
     updated.priority = priority;
     updated.scheduledAt = scheduled;

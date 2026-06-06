@@ -335,6 +335,9 @@ ApplicationWindow {
             if (statusBox.count > 0) {
                 statusBox.currentIndex = 0
             }
+            if (kindBox.count > 0) {
+                kindBox.currentIndex = 0
+            }
             if (pillarBox.count > 0) {
                 pillarBox.currentIndex = 0
             }
@@ -375,6 +378,11 @@ ApplicationWindow {
             const statusIndex = statusBox.indexOfValue(item.status)
             if (statusIndex >= 0) {
                 statusBox.currentIndex = statusIndex
+            }
+
+            const kindIndex = kindBox.indexOfValue(item.kindId)
+            if (kindIndex >= 0) {
+                kindBox.currentIndex = kindIndex
             }
 
             const pillarIndex = pillarBox.indexOfValue(item.pillarId)
@@ -450,10 +458,23 @@ ApplicationWindow {
                             }
 
                             GridLayout {
-                                columns: 6
+                                columns: quickAddDialog.editingContentId.length > 0 ? 8 : 6
                                 columnSpacing: 12
                                 rowSpacing: 12
                                 Layout.fillWidth: true
+
+                                Label {
+                                    text: "Kind"
+                                    visible: quickAddDialog.editingContentId.length > 0
+                                }
+                                ComboBox {
+                                    id: kindBox
+                                    Layout.fillWidth: true
+                                    visible: quickAddDialog.editingContentId.length > 0
+                                    model: appController.kindModel
+                                    textRole: "displayName"
+                                    valueRole: "lookupId"
+                                }
 
                                 Label { text: "Pillar" }
                                 ComboBox {
@@ -660,6 +681,7 @@ ApplicationWindow {
                 standardButtons: DialogButtonBox.Save | DialogButtonBox.Cancel
 
                 onAccepted: {
+                    const kindId = kindBox.currentIndex >= 0 ? kindBox.currentValue : ""
                     const pillarId = pillarBox.currentIndex >= 0 ? pillarBox.currentValue : ""
                     const channelId = channelBox.currentIndex >= 0 ? channelBox.currentValue : ""
                     const status = statusBox.currentIndex >= 0 ? statusBox.currentValue : "inbox"
@@ -668,6 +690,7 @@ ApplicationWindow {
                                                       inboxTitleField.text,
                                                       inboxDescriptionField.text,
                                                       inboxTagsField.text,
+                                                      kindId,
                                                       pillarId,
                                                       priorityBox.value,
                                                       scheduledAtSelector.value,

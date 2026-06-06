@@ -511,6 +511,7 @@ bool ContentRepository::update(const Domain::ContentItem &content, QString *erro
         "UPDATE content SET "
         "title = :title, "
         "description = :description, "
+        "kind_id = :kind_id, "
         "pillar_id = :pillar_id, "
         "suggested_channel_id = :suggested_channel_id, "
         "status = :status, "
@@ -522,6 +523,7 @@ bool ContentRepository::update(const Domain::ContentItem &content, QString *erro
     query.bindValue(":id"_L1, content.id);
     query.bindValue(":title"_L1, content.title.trimmed());
     query.bindValue(":description"_L1, nullableString(content.description.trimmed()));
+    query.bindValue(":kind_id"_L1, content.kindId);
     query.bindValue(":pillar_id"_L1, content.pillarId);
     query.bindValue(":suggested_channel_id"_L1, nullableString(content.suggestedChannelId));
     query.bindValue(":status"_L1, content.status);

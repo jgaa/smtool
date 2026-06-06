@@ -690,6 +690,7 @@ void DatabaseTests::updatesContentFields()
     const auto pillarId = lookups.lookupIdByKey(QStringLiteral("pillar"), QStringLiteral("tech"));
     const auto otherPillarId = lookups.lookupIdByKey(QStringLiteral("pillar"), QStringLiteral("product"));
     const auto kindId = lookups.lookupIdByKey(QStringLiteral("content_kind"), QStringLiteral("idea"));
+    const auto otherKindId = lookups.lookupIdByKey(QStringLiteral("content_kind"), QStringLiteral("blog_post"));
     const auto channelId = lookups.lookupIdByKey(QStringLiteral("channel"), QStringLiteral("linkedin"));
     const auto contentId = contentRepository.create({
         .title = QStringLiteral("Original"),
@@ -707,6 +708,7 @@ void DatabaseTests::updatesContentFields()
     item.title = QStringLiteral("Updated");
     item.description = QStringLiteral("After");
     item.tags = QStringLiteral("#Second; first\tinvalid/tag second");
+    item.kindId = otherKindId;
     item.pillarId = otherPillarId;
     item.suggestedChannelId = channelId;
     item.priority = 77;
@@ -718,6 +720,7 @@ void DatabaseTests::updatesContentFields()
     QCOMPARE(updated.title, QStringLiteral("Updated"));
     QCOMPARE(updated.description, QStringLiteral("After"));
     QCOMPARE(updated.tags, QStringLiteral("first second"));
+    QCOMPARE(updated.kindId, otherKindId);
     QCOMPARE(updated.pillarId, otherPillarId);
     QCOMPARE(updated.suggestedChannelId, channelId);
     QCOMPARE(updated.priority, 77);
