@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QDate>
 #include <QDateTime>
 #include <QString>
 
@@ -130,10 +131,14 @@ struct CalendarEntry {
     bool isOverdue = false;
 };
 
-struct DashboardMetric {
-    QString label;
-    int value = 0;
-    QString secondary;
+enum class DashboardHealth {
+    Good,
+    SlightlyLow,
+    Warning,
+    Bad,
+    Critical,
+    TooHigh,
+    Unknown,
 };
 
 struct Goal {
@@ -163,14 +168,42 @@ struct GoalBalanceItem {
     int sortOrder = 0;
 };
 
-struct DashboardData {
-    std::vector<DashboardMetric> byPillar;
-    std::vector<DashboardMetric> bySeries;
-    std::vector<DashboardMetric> byStatus;
-    std::vector<DashboardMetric> upcoming;
-    std::vector<DashboardMetric> publishedContent;
-    std::vector<DashboardMetric> publishedPublications;
-    std::vector<DashboardMetric> zeroPublishedPillars;
+struct DashboardPeriod {
+    QString key;
+    QString label;
+    QDate startDate;
+    QDate endDate;
+};
+
+struct DashboardRow {
+    QString goalId;
+    QString goalName;
+    QString goalType;
+    QString scopeType;
+    QString metricType;
+    QString displayName;
+    QString summaryText;
+    QString detailText;
+    double targetValue = 0.0;
+    double actualValue = 0.0;
+    double percent = 0.0;
+    double deviation = 0.0;
+    double absoluteDeviation = 0.0;
+    double requiredValue = 0.0;
+    double pipelineValue = 0.0;
+    double shortfallValue = 0.0;
+    double severityScore = 0.0;
+    DashboardHealth health = DashboardHealth::Unknown;
+};
+
+struct DashboardEvaluation {
+    DashboardPeriod performancePeriod;
+    DashboardPeriod pipelinePeriod;
+    std::vector<DashboardRow> goalAchievement;
+    std::vector<DashboardRow> pipelineCoverage;
+    std::vector<DashboardRow> balanceDeviation;
+    std::vector<DashboardRow> alerts;
+    std::vector<DashboardRow> recommendedFocus;
 };
 
 } // namespace SmTool::Domain

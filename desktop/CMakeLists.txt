@@ -29,9 +29,10 @@ set(SMTOOL_SOURCES
     src/app/appcontroller.cpp
     src/app/appinfo.cpp
     src/app/appsettings.cpp
+    src/app/dashboardservice.cpp
     src/app/loggingcontroller.cpp
+    src/data/calendarrepository.cpp
     src/data/contentrepository.cpp
-    src/data/dashboardrepository.cpp
     src/data/database.cpp
     src/data/goalsrepository.cpp
     src/data/lookupsrepository.cpp
@@ -41,7 +42,7 @@ set(SMTOOL_SOURCES
     src/models/calendarentrymodel.cpp
     src/models/contentlistmodel.cpp
     src/models/contentstatuslistmodel.cpp
-    src/models/dashboardmetricmodel.cpp
+    src/models/dashboardrowmodel.cpp
     src/models/goalslistmodel.cpp
     src/models/lookuplistmodel.cpp
     src/models/serieslistmodel.cpp
@@ -51,9 +52,10 @@ set(SMTOOL_HEADERS
     src/app/appcontroller.h
     src/app/appinfo.h
     src/app/appsettings.h
+    src/app/dashboardservice.h
     src/app/loggingcontroller.h
+    src/data/calendarrepository.h
     src/data/contentrepository.h
-    src/data/dashboardrepository.h
     src/data/database.h
     src/data/goalsrepository.h
     src/data/lookupsrepository.h
@@ -65,7 +67,7 @@ set(SMTOOL_HEADERS
     src/models/calendarentrymodel.h
     src/models/contentlistmodel.h
     src/models/contentstatuslistmodel.h
-    src/models/dashboardmetricmodel.h
+    src/models/dashboardrowmodel.h
     src/models/goalslistmodel.h
     src/models/lookuplistmodel.h
     src/models/serieslistmodel.h
@@ -86,6 +88,7 @@ qt_add_qml_module(SmToolApp
     VERSION 1.0
     QML_FILES
         src/ui/qml/AboutDialog.qml
+        src/ui/qml/DashboardView.qml
         src/ui/qml/Main.qml
         src/ui/qml/LogSettings.qml
         src/ui/qml/SettingsDialog.qml
@@ -127,8 +130,9 @@ qt_add_executable(SmToolTests
     tests/test_database.cpp
     src/app/appcontroller.cpp
     src/app/appinfo.cpp
+    src/app/dashboardservice.cpp
     src/data/contentrepository.cpp
-    src/data/dashboardrepository.cpp
+    src/data/calendarrepository.cpp
     src/data/database.cpp
     src/data/goalsrepository.cpp
     src/data/lookupsrepository.cpp
@@ -138,7 +142,7 @@ qt_add_executable(SmToolTests
     src/models/calendarentrymodel.cpp
     src/models/contentlistmodel.cpp
     src/models/contentstatuslistmodel.cpp
-    src/models/dashboardmetricmodel.cpp
+    src/models/dashboardrowmodel.cpp
     src/models/goalslistmodel.cpp
     src/models/lookuplistmodel.cpp
     src/models/serieslistmodel.cpp

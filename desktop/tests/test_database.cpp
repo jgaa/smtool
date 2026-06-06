@@ -1,7 +1,8 @@
 #include "app/appcontroller.h"
+#include "app/dashboardservice.h"
 #include "models/contentlistmodel.h"
+#include "data/calendarrepository.h"
 #include "data/contentrepository.h"
-#include "data/dashboardrepository.h"
 #include "data/database.h"
 #include "data/goalsrepository.h"
 #include "data/lookupsrepository.h"
@@ -73,6 +74,8 @@ private slots:
     void persistsMediaForContentAndPublication();
     void goalCrudWorks();
     void balanceGoalItemsPersistAndCascadeDelete();
+    void dashboardEvaluatesPerformanceAndPipeline();
+    void dashboardUsesPublicationsForChannelGoalsAndSkipsDisabledGoals();
 };
 
 void DatabaseTests::createsSchemaAndSeedsDefaults()
@@ -310,7 +313,7 @@ void DatabaseTests::calendarShowsContentAndPublicationSchedules()
 
     auto lookups = SmTool::Data::LookupsRepository{database.connection()};
     auto contentRepository = SmTool::Data::ContentRepository{database.connection()};
-    auto dashboardRepository = SmTool::Data::DashboardRepository{database.connection()};
+    auto calendarRepository = SmTool::Data::CalendarRepository{database.connection()};
 
     const auto pillarId = lookups.lookupIdByKey(QStringLiteral("pillar"), QStringLiteral("tech"));
     const auto kindId = lookups.lookupIdByKey(QStringLiteral("content_kind"), QStringLiteral("video"));
@@ -341,7 +344,7 @@ void DatabaseTests::calendarShowsContentAndPublicationSchedules()
     insertPublication.bindValue(":scheduled_at"_L1, publicationScheduledAt.toString(Qt::ISODate));
     QVERIFY(insertPublication.exec());
 
-    const auto entries = dashboardRepository.calendarEntries(false, false);
+    const auto entries = calendarRepository.calendarEntries(false, false);
     QVERIFY(std::ranges::any_of(entries, [&](const auto &entry) {
         return entry.contentId == contentId
             && entry.sourceType == "content"
@@ -365,7 +368,7 @@ void DatabaseTests::calendarFiltersArchivedAndPublishedAndMarksOverdue()
 
     auto lookups = SmTool::Data::LookupsRepository{database.connection()};
     auto contentRepository = SmTool::Data::ContentRepository{database.connection()};
-    auto dashboardRepository = SmTool::Data::DashboardRepository{database.connection()};
+    auto calendarRepository = SmTool::Data::CalendarRepository{database.connection()};
 
     const auto pillarId = lookups.lookupIdByKey(QStringLiteral("pillar"), QStringLiteral("tech"));
     const auto kindId = lookups.lookupIdByKey(QStringLiteral("content_kind"), QStringLiteral("video"));
@@ -438,7 +441,7 @@ void DatabaseTests::calendarFiltersArchivedAndPublishedAndMarksOverdue()
     insertPublication.bindValue(":scheduled_at"_L1, QDateTime::currentDateTimeUtc().addDays(5).toString(Qt::ISODate));
     QVERIFY(insertPublication.exec());
 
-    const auto filteredEntries = dashboardRepository.calendarEntries(false, false);
+    const auto filteredEntries = calendarRepository.calendarEntries(false, false);
     QVERIFY(std::ranges::any_of(filteredEntries, [&](const auto &entry) {
         return entry.contentId == overdueContentId && entry.isOverdue;
     }));
@@ -455,7 +458,7 @@ void DatabaseTests::calendarFiltersArchivedAndPublishedAndMarksOverdue()
         return entry.id == "pub-published"_L1;
     }));
 
-    const auto allEntries = dashboardRepository.calendarEntries(true, true);
+    const auto allEntries = calendarRepository.calendarEntries(true, true);
     QVERIFY(std::ranges::any_of(allEntries, [&](const auto &entry) {
         return entry.contentId == archivedContentId;
     }));
@@ -1183,6 +1186,251 @@ void DatabaseTests::balanceGoalItemsPersistAndCascadeDelete()
 
     QVERIFY2(goalsRepository.deleteGoal(goalId, &errorMessage), qPrintable(errorMessage));
     QCOMPARE(static_cast<int>(goalsRepository.listBalanceItems(goalId).size()), 0);
+}
+
+void DatabaseTests::dashboardEvaluatesPerformanceAndPipeline()
+{
+    SmTool::Data::Database database({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-dashboard-performance"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto lookups = SmTool::Data::LookupsRepository{database.connection()};
+    auto contentRepository = SmTool::Data::ContentRepository{database.connection()};
+    auto goalsRepository = SmTool::Data::GoalsRepository{database.connection()};
+    auto dashboardService = SmTool::App::DashboardService{database.connection()};
+
+    const auto techPillarId = lookups.lookupIdByKey(QStringLiteral("pillar"), QStringLiteral("tech"));
+    const auto productPillarId = lookups.lookupIdByKey(QStringLiteral("pillar"), QStringLiteral("product"));
+    const auto kindId = lookups.lookupIdByKey(QStringLiteral("content_kind"), QStringLiteral("blog_post"));
+    QVERIFY(!techPillarId.isEmpty());
+    QVERIFY(!productPillarId.isEmpty());
+    QVERIFY(!kindId.isEmpty());
+
+    const auto now = QDateTime::currentDateTimeUtc();
+    for (const auto &title : {QStringLiteral("Tech published 1"), QStringLiteral("Tech published 2")}) {
+        QVERIFY2(!contentRepository.create({
+            .title = title,
+            .kindId = kindId,
+            .pillarId = techPillarId,
+            .status = QStringLiteral("published"),
+            .priority = 10,
+            .publishedAt = now.addDays(-10),
+            .createdAt = now.addDays(-10),
+            .updatedAt = now.addDays(-10),
+        }, &errorMessage).isEmpty(), qPrintable(errorMessage));
+    }
+
+    QVERIFY2(!contentRepository.create({
+        .title = QStringLiteral("Product published"),
+        .kindId = kindId,
+        .pillarId = productPillarId,
+        .status = QStringLiteral("published"),
+        .priority = 10,
+        .publishedAt = now.addDays(-5),
+        .createdAt = now.addDays(-5),
+        .updatedAt = now.addDays(-5),
+    }, &errorMessage).isEmpty(), qPrintable(errorMessage));
+
+    QVERIFY2(!contentRepository.create({
+        .title = QStringLiteral("Tech drafting"),
+        .kindId = kindId,
+        .pillarId = techPillarId,
+        .status = QStringLiteral("drafting"),
+        .priority = 10,
+        .createdAt = now,
+        .updatedAt = now,
+    }, &errorMessage).isEmpty(), qPrintable(errorMessage));
+    QVERIFY2(!contentRepository.create({
+        .title = QStringLiteral("Tech ready"),
+        .kindId = kindId,
+        .pillarId = techPillarId,
+        .status = QStringLiteral("ready"),
+        .priority = 10,
+        .createdAt = now,
+        .updatedAt = now,
+    }, &errorMessage).isEmpty(), qPrintable(errorMessage));
+
+    const auto throughputGoalId = goalsRepository.createGoal({
+        .name = QStringLiteral("Tech throughput"),
+        .goalType = QStringLiteral("count"),
+        .scopeType = QStringLiteral("pillar"),
+        .scopeId = techPillarId,
+        .metricType = QStringLiteral("content_count"),
+        .targetValue = 4,
+        .periodType = QStringLiteral("month"),
+        .periodValue = 1,
+        .enabled = true,
+    }, &errorMessage);
+    QVERIFY2(!throughputGoalId.isEmpty(), qPrintable(errorMessage));
+
+    const auto balanceGoalId = goalsRepository.createGoal({
+        .name = QStringLiteral("Pillar balance"),
+        .goalType = QStringLiteral("balance"),
+        .scopeType = QStringLiteral("pillar"),
+        .metricType = QStringLiteral("balance_weight"),
+        .enabled = true,
+    }, &errorMessage);
+    QVERIFY2(!balanceGoalId.isEmpty(), qPrintable(errorMessage));
+    QVERIFY2(goalsRepository.updateBalanceItems(balanceGoalId,
+                                                QStringLiteral("pillar"),
+                                                {
+                                                    {.scopeId = techPillarId, .weight = 3, .sortOrder = 0},
+                                                    {.scopeId = productPillarId, .weight = 1, .sortOrder = 1},
+                                                },
+                                                &errorMessage),
+             qPrintable(errorMessage));
+
+    const auto evaluation = dashboardService.evaluate({.key = QStringLiteral("last_30_days")},
+                                                      {.key = QStringLiteral("next_30_days")});
+
+    QCOMPARE(static_cast<int>(evaluation.goalAchievement.size()), 1);
+    QCOMPARE(evaluation.goalAchievement.front().displayName, QStringLiteral("Tech"));
+    QCOMPARE(evaluation.goalAchievement.front().actualValue, 2.0);
+    QCOMPARE(evaluation.goalAchievement.front().targetValue, 4.0);
+    QCOMPARE(evaluation.goalAchievement.front().percent, 50.0);
+
+    QCOMPARE(static_cast<int>(evaluation.pipelineCoverage.size()), 1);
+    QCOMPARE(evaluation.pipelineCoverage.front().displayName, QStringLiteral("Tech"));
+    QCOMPARE(evaluation.pipelineCoverage.front().pipelineValue, 2.0);
+    QCOMPARE(evaluation.pipelineCoverage.front().requiredValue, 4.0);
+    QCOMPARE(evaluation.pipelineCoverage.front().percent, 50.0);
+
+    QCOMPARE(static_cast<int>(evaluation.balanceDeviation.size()), 2);
+    const auto techBalance = std::ranges::find_if(evaluation.balanceDeviation, [](const auto &row) {
+        return row.displayName == QStringLiteral("Tech");
+    });
+    QVERIFY(techBalance != evaluation.balanceDeviation.end());
+    QCOMPARE(techBalance->targetValue, 75.0);
+    QCOMPARE(techBalance->actualValue, 66.7);
+}
+
+void DatabaseTests::dashboardUsesPublicationsForChannelGoalsAndSkipsDisabledGoals()
+{
+    SmTool::Data::Database database({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-dashboard-channel"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto lookups = SmTool::Data::LookupsRepository{database.connection()};
+    auto contentRepository = SmTool::Data::ContentRepository{database.connection()};
+    auto goalsRepository = SmTool::Data::GoalsRepository{database.connection()};
+    auto dashboardService = SmTool::App::DashboardService{database.connection()};
+
+    const auto techPillarId = lookups.lookupIdByKey(QStringLiteral("pillar"), QStringLiteral("tech"));
+    const auto kindId = lookups.lookupIdByKey(QStringLiteral("content_kind"), QStringLiteral("video"));
+    const auto linkedinId = lookups.lookupIdByKey(QStringLiteral("channel"), QStringLiteral("linkedin"));
+    const auto youtubeId = lookups.lookupIdByKey(QStringLiteral("channel"), QStringLiteral("youtube"));
+    const auto productPillarId = lookups.lookupIdByKey(QStringLiteral("pillar"), QStringLiteral("product"));
+    QVERIFY(!techPillarId.isEmpty());
+    QVERIFY(!kindId.isEmpty());
+    QVERIFY(!linkedinId.isEmpty());
+    QVERIFY(!youtubeId.isEmpty());
+    QVERIFY(!productPillarId.isEmpty());
+
+    const auto now = QDateTime::currentDateTimeUtc();
+    const auto contentId = contentRepository.create({
+        .title = QStringLiteral("Distribution source"),
+        .kindId = kindId,
+        .pillarId = techPillarId,
+        .status = QStringLiteral("ready"),
+        .priority = 10,
+        .createdAt = now.addDays(-7),
+        .updatedAt = now.addDays(-7),
+    }, &errorMessage);
+    QVERIFY2(!contentId.isEmpty(), qPrintable(errorMessage));
+
+    QSqlQuery publicationQuery{database.connection()};
+    publicationQuery.prepare(QStringLiteral(
+        "INSERT INTO publication "
+        "(id, content_id, channel_id, status, scheduled_at, published_at, url, created_at, updated_at) "
+        "VALUES (:id, :content_id, :channel_id, 'published', NULL, :published_at, '', :created_at, :updated_at)"));
+
+    publicationQuery.bindValue(":id"_L1, QStringLiteral("pub-li-1"));
+    publicationQuery.bindValue(":content_id"_L1, contentId);
+    publicationQuery.bindValue(":channel_id"_L1, linkedinId);
+    publicationQuery.bindValue(":published_at"_L1, now.addDays(-3).toString(Qt::ISODate));
+    publicationQuery.bindValue(":created_at"_L1, now.addDays(-3).toString(Qt::ISODate));
+    publicationQuery.bindValue(":updated_at"_L1, now.addDays(-3).toString(Qt::ISODate));
+    QVERIFY(publicationQuery.exec());
+
+    publicationQuery.bindValue(":id"_L1, QStringLiteral("pub-yt-1"));
+    publicationQuery.bindValue(":channel_id"_L1, youtubeId);
+    publicationQuery.bindValue(":published_at"_L1, now.addDays(-2).toString(Qt::ISODate));
+    publicationQuery.bindValue(":created_at"_L1, now.addDays(-2).toString(Qt::ISODate));
+    publicationQuery.bindValue(":updated_at"_L1, now.addDays(-2).toString(Qt::ISODate));
+    QVERIFY(publicationQuery.exec());
+
+    publicationQuery.bindValue(":id"_L1, QStringLiteral("pub-yt-2"));
+    publicationQuery.bindValue(":channel_id"_L1, youtubeId);
+    publicationQuery.bindValue(":published_at"_L1, now.addDays(-1).toString(Qt::ISODate));
+    publicationQuery.bindValue(":created_at"_L1, now.addDays(-1).toString(Qt::ISODate));
+    publicationQuery.bindValue(":updated_at"_L1, now.addDays(-1).toString(Qt::ISODate));
+    QVERIFY(publicationQuery.exec());
+
+    QVERIFY2(!goalsRepository.createGoal({
+        .name = QStringLiteral("LinkedIn cadence"),
+        .goalType = QStringLiteral("cadence"),
+        .scopeType = QStringLiteral("channel"),
+        .scopeId = linkedinId,
+        .metricType = QStringLiteral("publication_count"),
+        .targetValue = 2,
+        .periodType = QStringLiteral("week"),
+        .periodValue = 1,
+        .enabled = true,
+    }, &errorMessage).isEmpty(), qPrintable(errorMessage));
+
+    QVERIFY2(!goalsRepository.createGoal({
+        .name = QStringLiteral("Disabled product"),
+        .goalType = QStringLiteral("count"),
+        .scopeType = QStringLiteral("pillar"),
+        .scopeId = productPillarId,
+        .metricType = QStringLiteral("content_count"),
+        .targetValue = 1,
+        .periodType = QStringLiteral("month"),
+        .periodValue = 1,
+        .enabled = false,
+    }, &errorMessage).isEmpty(), qPrintable(errorMessage));
+
+    const auto channelBalanceGoalId = goalsRepository.createGoal({
+        .name = QStringLiteral("Channel balance"),
+        .goalType = QStringLiteral("balance"),
+        .scopeType = QStringLiteral("channel"),
+        .metricType = QStringLiteral("balance_weight"),
+        .enabled = true,
+    }, &errorMessage);
+    QVERIFY2(!channelBalanceGoalId.isEmpty(), qPrintable(errorMessage));
+    QVERIFY2(goalsRepository.updateBalanceItems(channelBalanceGoalId,
+                                                QStringLiteral("channel"),
+                                                {
+                                                    {.scopeId = youtubeId, .weight = 1, .sortOrder = 0},
+                                                    {.scopeId = linkedinId, .weight = 1, .sortOrder = 1},
+                                                },
+                                                &errorMessage),
+             qPrintable(errorMessage));
+
+    const auto evaluation = dashboardService.evaluate({.key = QStringLiteral("last_30_days")},
+                                                      {.key = QStringLiteral("next_30_days")});
+
+    QCOMPARE(static_cast<int>(evaluation.goalAchievement.size()), 1);
+    QCOMPARE(evaluation.goalAchievement.front().displayName, QStringLiteral("Linkedin"));
+    QCOMPARE(evaluation.goalAchievement.front().actualValue, 1.0);
+    QCOMPARE(evaluation.goalAchievement.front().targetValue, 10.0);
+
+    QVERIFY(std::ranges::none_of(evaluation.goalAchievement, [](const auto &row) {
+        return row.goalName == QStringLiteral("Disabled product");
+    }));
+
+    const auto youtubeBalance = std::ranges::find_if(evaluation.balanceDeviation, [](const auto &row) {
+        return row.displayName == QStringLiteral("Youtube");
+    });
+    QVERIFY(youtubeBalance != evaluation.balanceDeviation.end());
+    QCOMPARE(youtubeBalance->actualValue, 66.7);
+    QCOMPARE(youtubeBalance->targetValue, 50.0);
 }
 
 QTEST_MAIN(DatabaseTests)

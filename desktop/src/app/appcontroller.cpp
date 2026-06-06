@@ -281,13 +281,11 @@ Models::LookupListModel *AppController::kindModel() { return &kindModel_; }
 Models::LookupListModel *AppController::channelModel() { return &channelModel_; }
 Models::LookupListModel *AppController::goalSeriesModel() { return &goalSeriesModel_; }
 Models::GoalsListModel *AppController::goalsModel() { return &goalsModel_; }
-Models::DashboardMetricModel *AppController::dashboardByPillarModel() { return &dashboardByPillarModel_; }
-Models::DashboardMetricModel *AppController::dashboardBySeriesModel() { return &dashboardBySeriesModel_; }
-Models::DashboardMetricModel *AppController::dashboardByStatusModel() { return &dashboardByStatusModel_; }
-Models::DashboardMetricModel *AppController::dashboardUpcomingModel() { return &dashboardUpcomingModel_; }
-Models::DashboardMetricModel *AppController::dashboardPublishedContentModel() { return &dashboardPublishedContentModel_; }
-Models::DashboardMetricModel *AppController::dashboardPublishedPublicationsModel() { return &dashboardPublishedPublicationsModel_; }
-Models::DashboardMetricModel *AppController::dashboardZeroPublishedPillarsModel() { return &dashboardZeroPublishedPillarsModel_; }
+Models::DashboardRowModel *AppController::goalAchievementModel() { return &goalAchievementModel_; }
+Models::DashboardRowModel *AppController::pipelineCoverageModel() { return &pipelineCoverageModel_; }
+Models::DashboardRowModel *AppController::balanceDeviationModel() { return &balanceDeviationModel_; }
+Models::DashboardRowModel *AppController::dashboardAlertsModel() { return &dashboardAlertsModel_; }
+Models::DashboardRowModel *AppController::recommendedFocusModel() { return &recommendedFocusModel_; }
 
 bool AppController::boardShowArchived() const { return boardShowArchived_; }
 
@@ -311,18 +309,6 @@ void AppController::setAllContentShowArchived(bool enabled)
     allContentShowArchived_ = enabled;
     refreshAllContent();
     emit allContentShowArchivedChanged();
-}
-
-bool AppController::dashboardIncludeArchived() const { return dashboardIncludeArchived_; }
-
-void AppController::setDashboardIncludeArchived(bool enabled)
-{
-    if (dashboardIncludeArchived_ == enabled) {
-        return;
-    }
-    dashboardIncludeArchived_ = enabled;
-    refreshDashboard();
-    emit dashboardIncludeArchivedChanged();
 }
 
 bool AppController::calendarIncludeArchived() const { return calendarIncludeArchived_; }
@@ -376,6 +362,30 @@ void AppController::setSearchQuery(const QString &value)
     emit searchQueryChanged();
 }
 
+QString AppController::dashboardPerformancePeriodKey() const { return dashboardPerformanceSelection_.key; }
+QString AppController::dashboardPerformanceStartDate() const { return dashboardPerformanceSelection_.startDate; }
+QString AppController::dashboardPerformanceEndDate() const { return dashboardPerformanceSelection_.endDate; }
+
+QString AppController::dashboardPerformancePeriodLabel() const
+{
+    if (!dashboardService_) {
+        return QStringLiteral("Last 90 days");
+    }
+    return dashboardService_->resolvePerformancePeriod(dashboardPerformanceSelection_).label;
+}
+
+QString AppController::dashboardPipelinePeriodKey() const { return dashboardPipelineSelection_.key; }
+QString AppController::dashboardPipelineStartDate() const { return dashboardPipelineSelection_.startDate; }
+QString AppController::dashboardPipelineEndDate() const { return dashboardPipelineSelection_.endDate; }
+
+QString AppController::dashboardPipelinePeriodLabel() const
+{
+    if (!dashboardService_) {
+        return QStringLiteral("Next 30 days");
+    }
+    return dashboardService_->resolvePipelinePeriod(dashboardPipelineSelection_).label;
+}
+
 QString AppController::statusMessage() const { return statusMessage_; }
 
 int AppController::allContentSortMode() const
@@ -411,6 +421,28 @@ bool AppController::refreshAll()
     refreshGoals();
     refreshDashboard();
     return true;
+}
+
+void AppController::configureDashboardPerformancePeriod(const QString &key,
+                                                        const QString &startDate,
+                                                        const QString &endDate)
+{
+    dashboardPerformanceSelection_.key = key.trimmed().isEmpty() ? QStringLiteral("last_90_days") : key.trimmed();
+    dashboardPerformanceSelection_.startDate = startDate.trimmed();
+    dashboardPerformanceSelection_.endDate = endDate.trimmed();
+    refreshDashboard();
+    emit dashboardPeriodsChanged();
+}
+
+void AppController::configureDashboardPipelinePeriod(const QString &key,
+                                                     const QString &startDate,
+                                                     const QString &endDate)
+{
+    dashboardPipelineSelection_.key = key.trimmed().isEmpty() ? QStringLiteral("next_30_days") : key.trimmed();
+    dashboardPipelineSelection_.startDate = startDate.trimmed();
+    dashboardPipelineSelection_.endDate = endDate.trimmed();
+    refreshDashboard();
+    emit dashboardPeriodsChanged();
 }
 
 QObject *AppController::boardModelForStatus(const QString &statusId) const
@@ -871,6 +903,7 @@ bool AppController::saveGoal(const QVariantMap &goalData, const QVariantList &ba
     }
 
     refreshGoals();
+    refreshDashboard();
     setStatusMessage(goal.id.isEmpty() ? QStringLiteral("Goal created.") : QStringLiteral("Goal updated."));
     return true;
 }
@@ -889,6 +922,7 @@ bool AppController::deleteGoal(const QString &goalId)
     }
 
     refreshGoals();
+    refreshDashboard();
     setStatusMessage(QStringLiteral("Goal removed."));
     return true;
 }
@@ -907,6 +941,7 @@ bool AppController::setGoalEnabled(const QString &goalId, bool enabled)
     }
 
     refreshGoals();
+    refreshDashboard();
     setStatusMessage(enabled ? QStringLiteral("Goal enabled.") : QStringLiteral("Goal disabled."));
     return true;
 }
@@ -1480,21 +1515,23 @@ void AppController::initializeRepositories()
 {
     auto db = database_.connection();
     lookupsRepository_ = std::make_unique<Data::LookupsRepository>(db);
+    calendarRepository_ = std::make_unique<Data::CalendarRepository>(db);
     mediaRepository_ = std::make_unique<Data::MediaRepository>(db);
     publicationRepository_ = std::make_unique<Data::PublicationRepository>(db);
     seriesRepository_ = std::make_unique<Data::SeriesRepository>(db);
     contentRepository_ = std::make_unique<Data::ContentRepository>(db);
     goalsRepository_ = std::make_unique<Data::GoalsRepository>(db);
-    dashboardRepository_ = std::make_unique<Data::DashboardRepository>(db);
+    dashboardService_ = std::make_unique<DashboardService>(db);
 }
 
 void AppController::resetRepositories()
 {
-    dashboardRepository_.reset();
+    dashboardService_.reset();
     contentRepository_.reset();
     seriesRepository_.reset();
     publicationRepository_.reset();
     mediaRepository_.reset();
+    calendarRepository_.reset();
     lookupsRepository_.reset();
     goalsRepository_.reset();
 }
@@ -1560,7 +1597,10 @@ void AppController::refreshBoard()
 
 void AppController::refreshCalendar()
 {
-    calendarModel_.setItems(dashboardRepository_->calendarEntries(calendarIncludeArchived_, calendarIncludePublished_, searchQuery_));
+    calendarModel_.setItems(calendarRepository_ ? calendarRepository_->calendarEntries(calendarIncludeArchived_,
+                                                                                       calendarIncludePublished_,
+                                                                                       searchQuery_)
+                                               : std::vector<Domain::CalendarEntry>{});
 }
 
 void AppController::refreshSources()
@@ -1590,14 +1630,21 @@ void AppController::refreshGoals()
 
 void AppController::refreshDashboard()
 {
-    const auto data = dashboardRepository_->dashboardData(dashboardIncludeArchived_);
-    dashboardByPillarModel_.setItems(data.byPillar);
-    dashboardBySeriesModel_.setItems(data.bySeries);
-    dashboardByStatusModel_.setItems(data.byStatus);
-    dashboardUpcomingModel_.setItems(data.upcoming);
-    dashboardPublishedContentModel_.setItems(data.publishedContent);
-    dashboardPublishedPublicationsModel_.setItems(data.publishedPublications);
-    dashboardZeroPublishedPillarsModel_.setItems(data.zeroPublishedPillars);
+    if (!dashboardService_) {
+        goalAchievementModel_.setItems({});
+        pipelineCoverageModel_.setItems({});
+        balanceDeviationModel_.setItems({});
+        dashboardAlertsModel_.setItems({});
+        recommendedFocusModel_.setItems({});
+        return;
+    }
+
+    const auto evaluation = dashboardService_->evaluate(dashboardPerformanceSelection_, dashboardPipelineSelection_);
+    goalAchievementModel_.setItems(evaluation.goalAchievement);
+    pipelineCoverageModel_.setItems(evaluation.pipelineCoverage);
+    balanceDeviationModel_.setItems(evaluation.balanceDeviation);
+    dashboardAlertsModel_.setItems(evaluation.alerts);
+    recommendedFocusModel_.setItems(evaluation.recommendedFocus);
 }
 
 void AppController::refreshClipboardHasText()

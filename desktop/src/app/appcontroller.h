@@ -1,7 +1,8 @@
 #pragma once
 
+#include "app/dashboardservice.h"
+#include "data/calendarrepository.h"
 #include "data/contentrepository.h"
-#include "data/dashboardrepository.h"
 #include "data/database.h"
 #include "data/goalsrepository.h"
 #include "data/lookupsrepository.h"
@@ -11,7 +12,7 @@
 #include "models/calendarentrymodel.h"
 #include "models/contentlistmodel.h"
 #include "models/contentstatuslistmodel.h"
-#include "models/dashboardmetricmodel.h"
+#include "models/dashboardrowmodel.h"
 #include "models/goalslistmodel.h"
 #include "models/lookuplistmodel.h"
 #include "models/serieslistmodel.h"
@@ -41,21 +42,26 @@ class AppController : public QObject
     Q_PROPERTY(SmTool::Models::LookupListModel *channelModel READ channelModel CONSTANT)
     Q_PROPERTY(SmTool::Models::LookupListModel *goalSeriesModel READ goalSeriesModel CONSTANT)
     Q_PROPERTY(SmTool::Models::GoalsListModel *goalsModel READ goalsModel CONSTANT)
-    Q_PROPERTY(SmTool::Models::DashboardMetricModel *dashboardByPillarModel READ dashboardByPillarModel CONSTANT)
-    Q_PROPERTY(SmTool::Models::DashboardMetricModel *dashboardBySeriesModel READ dashboardBySeriesModel CONSTANT)
-    Q_PROPERTY(SmTool::Models::DashboardMetricModel *dashboardByStatusModel READ dashboardByStatusModel CONSTANT)
-    Q_PROPERTY(SmTool::Models::DashboardMetricModel *dashboardUpcomingModel READ dashboardUpcomingModel CONSTANT)
-    Q_PROPERTY(SmTool::Models::DashboardMetricModel *dashboardPublishedContentModel READ dashboardPublishedContentModel CONSTANT)
-    Q_PROPERTY(SmTool::Models::DashboardMetricModel *dashboardPublishedPublicationsModel READ dashboardPublishedPublicationsModel CONSTANT)
-    Q_PROPERTY(SmTool::Models::DashboardMetricModel *dashboardZeroPublishedPillarsModel READ dashboardZeroPublishedPillarsModel CONSTANT)
+    Q_PROPERTY(SmTool::Models::DashboardRowModel *goalAchievementModel READ goalAchievementModel CONSTANT)
+    Q_PROPERTY(SmTool::Models::DashboardRowModel *pipelineCoverageModel READ pipelineCoverageModel CONSTANT)
+    Q_PROPERTY(SmTool::Models::DashboardRowModel *balanceDeviationModel READ balanceDeviationModel CONSTANT)
+    Q_PROPERTY(SmTool::Models::DashboardRowModel *dashboardAlertsModel READ dashboardAlertsModel CONSTANT)
+    Q_PROPERTY(SmTool::Models::DashboardRowModel *recommendedFocusModel READ recommendedFocusModel CONSTANT)
     Q_PROPERTY(bool boardShowArchived READ boardShowArchived WRITE setBoardShowArchived NOTIFY boardShowArchivedChanged)
     Q_PROPERTY(bool allContentShowArchived READ allContentShowArchived WRITE setAllContentShowArchived NOTIFY allContentShowArchivedChanged)
-    Q_PROPERTY(bool dashboardIncludeArchived READ dashboardIncludeArchived WRITE setDashboardIncludeArchived NOTIFY dashboardIncludeArchivedChanged)
     Q_PROPERTY(bool calendarIncludeArchived READ calendarIncludeArchived WRITE setCalendarIncludeArchived NOTIFY calendarIncludeArchivedChanged)
     Q_PROPERTY(bool calendarIncludePublished READ calendarIncludePublished WRITE setCalendarIncludePublished NOTIFY calendarIncludePublishedChanged)
     Q_PROPERTY(bool clipboardHasText READ clipboardHasText NOTIFY clipboardHasTextChanged)
     Q_PROPERTY(QString currentSourceId READ currentSourceId WRITE setCurrentSourceId NOTIFY currentSourceIdChanged)
     Q_PROPERTY(QString searchQuery READ searchQuery WRITE setSearchQuery NOTIFY searchQueryChanged)
+    Q_PROPERTY(QString dashboardPerformancePeriodKey READ dashboardPerformancePeriodKey NOTIFY dashboardPeriodsChanged)
+    Q_PROPERTY(QString dashboardPerformanceStartDate READ dashboardPerformanceStartDate NOTIFY dashboardPeriodsChanged)
+    Q_PROPERTY(QString dashboardPerformanceEndDate READ dashboardPerformanceEndDate NOTIFY dashboardPeriodsChanged)
+    Q_PROPERTY(QString dashboardPerformancePeriodLabel READ dashboardPerformancePeriodLabel NOTIFY dashboardPeriodsChanged)
+    Q_PROPERTY(QString dashboardPipelinePeriodKey READ dashboardPipelinePeriodKey NOTIFY dashboardPeriodsChanged)
+    Q_PROPERTY(QString dashboardPipelineStartDate READ dashboardPipelineStartDate NOTIFY dashboardPeriodsChanged)
+    Q_PROPERTY(QString dashboardPipelineEndDate READ dashboardPipelineEndDate NOTIFY dashboardPeriodsChanged)
+    Q_PROPERTY(QString dashboardPipelinePeriodLabel READ dashboardPipelinePeriodLabel NOTIFY dashboardPeriodsChanged)
     Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY statusMessageChanged)
 
 public:
@@ -77,22 +83,17 @@ public:
     [[nodiscard]] Models::LookupListModel *channelModel();
     [[nodiscard]] Models::LookupListModel *goalSeriesModel();
     [[nodiscard]] Models::GoalsListModel *goalsModel();
-    [[nodiscard]] Models::DashboardMetricModel *dashboardByPillarModel();
-    [[nodiscard]] Models::DashboardMetricModel *dashboardBySeriesModel();
-    [[nodiscard]] Models::DashboardMetricModel *dashboardByStatusModel();
-    [[nodiscard]] Models::DashboardMetricModel *dashboardUpcomingModel();
-    [[nodiscard]] Models::DashboardMetricModel *dashboardPublishedContentModel();
-    [[nodiscard]] Models::DashboardMetricModel *dashboardPublishedPublicationsModel();
-    [[nodiscard]] Models::DashboardMetricModel *dashboardZeroPublishedPillarsModel();
+    [[nodiscard]] Models::DashboardRowModel *goalAchievementModel();
+    [[nodiscard]] Models::DashboardRowModel *pipelineCoverageModel();
+    [[nodiscard]] Models::DashboardRowModel *balanceDeviationModel();
+    [[nodiscard]] Models::DashboardRowModel *dashboardAlertsModel();
+    [[nodiscard]] Models::DashboardRowModel *recommendedFocusModel();
 
     [[nodiscard]] bool boardShowArchived() const;
     void setBoardShowArchived(bool enabled);
 
     [[nodiscard]] bool allContentShowArchived() const;
     void setAllContentShowArchived(bool enabled);
-
-    [[nodiscard]] bool dashboardIncludeArchived() const;
-    void setDashboardIncludeArchived(bool enabled);
 
     [[nodiscard]] bool calendarIncludeArchived() const;
     void setCalendarIncludeArchived(bool enabled);
@@ -107,6 +108,14 @@ public:
 
     [[nodiscard]] QString searchQuery() const;
     void setSearchQuery(const QString &value);
+    [[nodiscard]] QString dashboardPerformancePeriodKey() const;
+    [[nodiscard]] QString dashboardPerformanceStartDate() const;
+    [[nodiscard]] QString dashboardPerformanceEndDate() const;
+    [[nodiscard]] QString dashboardPerformancePeriodLabel() const;
+    [[nodiscard]] QString dashboardPipelinePeriodKey() const;
+    [[nodiscard]] QString dashboardPipelineStartDate() const;
+    [[nodiscard]] QString dashboardPipelineEndDate() const;
+    [[nodiscard]] QString dashboardPipelinePeriodLabel() const;
 
     [[nodiscard]] QString statusMessage() const;
     Q_INVOKABLE int allContentSortMode() const;
@@ -115,6 +124,12 @@ public:
 
     Q_INVOKABLE bool refreshAll();
     Q_INVOKABLE bool applyDatabasePath(const QString &path);
+    Q_INVOKABLE void configureDashboardPerformancePeriod(const QString &key,
+                                                         const QString &startDate = {},
+                                                         const QString &endDate = {});
+    Q_INVOKABLE void configureDashboardPipelinePeriod(const QString &key,
+                                                      const QString &startDate = {},
+                                                      const QString &endDate = {});
     Q_INVOKABLE void copyTextToClipboard(const QString &text) const;
     Q_INVOKABLE bool pasteClipboardToIdea();
     Q_INVOKABLE bool createIdeaFromText(const QString &text);
@@ -177,12 +192,12 @@ public:
 signals:
     void boardShowArchivedChanged();
     void allContentShowArchivedChanged();
-    void dashboardIncludeArchivedChanged();
     void calendarIncludeArchivedChanged();
     void calendarIncludePublishedChanged();
     void clipboardHasTextChanged();
     void currentSourceIdChanged();
     void searchQueryChanged();
+    void dashboardPeriodsChanged();
     void statusMessageChanged();
 
 private:
@@ -216,13 +231,16 @@ private:
                                         QString *errorMessage) const;
 
     Data::Database database_;
+    DashboardService::PeriodSelection dashboardPerformanceSelection_{.key = QStringLiteral("last_90_days")};
+    DashboardService::PeriodSelection dashboardPipelineSelection_{.key = QStringLiteral("next_30_days")};
     std::unique_ptr<Data::LookupsRepository> lookupsRepository_;
+    std::unique_ptr<Data::CalendarRepository> calendarRepository_;
     std::unique_ptr<Data::MediaRepository> mediaRepository_;
     std::unique_ptr<Data::PublicationRepository> publicationRepository_;
     std::unique_ptr<Data::SeriesRepository> seriesRepository_;
     std::unique_ptr<Data::ContentRepository> contentRepository_;
     std::unique_ptr<Data::GoalsRepository> goalsRepository_;
-    std::unique_ptr<Data::DashboardRepository> dashboardRepository_;
+    std::unique_ptr<DashboardService> dashboardService_;
 
     Models::ContentListModel inboxModel_;
     Models::ContentStatusListModel contentStatusModel_;
@@ -237,17 +255,14 @@ private:
     Models::LookupListModel channelModel_;
     Models::LookupListModel goalSeriesModel_;
     Models::GoalsListModel goalsModel_;
-    Models::DashboardMetricModel dashboardByPillarModel_;
-    Models::DashboardMetricModel dashboardBySeriesModel_;
-    Models::DashboardMetricModel dashboardByStatusModel_;
-    Models::DashboardMetricModel dashboardUpcomingModel_;
-    Models::DashboardMetricModel dashboardPublishedContentModel_;
-    Models::DashboardMetricModel dashboardPublishedPublicationsModel_;
-    Models::DashboardMetricModel dashboardZeroPublishedPillarsModel_;
+    Models::DashboardRowModel goalAchievementModel_;
+    Models::DashboardRowModel pipelineCoverageModel_;
+    Models::DashboardRowModel balanceDeviationModel_;
+    Models::DashboardRowModel dashboardAlertsModel_;
+    Models::DashboardRowModel recommendedFocusModel_;
 
     bool boardShowArchived_ = false;
     bool allContentShowArchived_ = false;
-    bool dashboardIncludeArchived_ = false;
     bool calendarIncludeArchived_ = false;
     bool calendarIncludePublished_ = false;
     bool clipboardHasText_ = false;
