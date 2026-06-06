@@ -136,6 +136,33 @@ struct DashboardMetric {
     QString secondary;
 };
 
+struct Goal {
+    QString id;
+    QString name;
+    QString goalType;
+    QString scopeType;
+    QString scopeId;
+    QString scopeDisplayName;
+    QString metricType;
+    int targetValue = 0;
+    QString periodType;
+    int periodValue = 0;
+    bool enabled = true;
+    QString summaryText;
+    QDateTime createdAt;
+    QDateTime updatedAt;
+};
+
+struct GoalBalanceItem {
+    QString id;
+    QString goalId;
+    QString scopeType;
+    QString scopeId;
+    QString scopeDisplayName;
+    int weight = 0;
+    int sortOrder = 0;
+};
+
 struct DashboardData {
     std::vector<DashboardMetric> byPillar;
     std::vector<DashboardMetric> bySeries;

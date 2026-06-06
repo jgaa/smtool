@@ -33,6 +33,7 @@ set(SMTOOL_SOURCES
     src/data/contentrepository.cpp
     src/data/dashboardrepository.cpp
     src/data/database.cpp
+    src/data/goalsrepository.cpp
     src/data/lookupsrepository.cpp
     src/data/mediarepository.cpp
     src/data/publicationrepository.cpp
@@ -41,6 +42,7 @@ set(SMTOOL_SOURCES
     src/models/contentlistmodel.cpp
     src/models/contentstatuslistmodel.cpp
     src/models/dashboardmetricmodel.cpp
+    src/models/goalslistmodel.cpp
     src/models/lookuplistmodel.cpp
     src/models/serieslistmodel.cpp
 )
@@ -53,6 +55,7 @@ set(SMTOOL_HEADERS
     src/data/contentrepository.h
     src/data/dashboardrepository.h
     src/data/database.h
+    src/data/goalsrepository.h
     src/data/lookupsrepository.h
     src/data/mediarepository.h
     src/data/publicationrepository.h
@@ -63,6 +66,7 @@ set(SMTOOL_HEADERS
     src/models/contentlistmodel.h
     src/models/contentstatuslistmodel.h
     src/models/dashboardmetricmodel.h
+    src/models/goalslistmodel.h
     src/models/lookuplistmodel.h
     src/models/serieslistmodel.h
 )
@@ -98,6 +102,7 @@ qt_add_resources(SmToolApp smtool_resources
     PREFIX /
     FILES
         resources/migrations/001_initial.sql
+        resources/migrations/002_goals.sql
 )
 
 target_include_directories(SmToolApp PRIVATE src)
@@ -125,6 +130,7 @@ qt_add_executable(SmToolTests
     src/data/contentrepository.cpp
     src/data/dashboardrepository.cpp
     src/data/database.cpp
+    src/data/goalsrepository.cpp
     src/data/lookupsrepository.cpp
     src/data/mediarepository.cpp
     src/data/publicationrepository.cpp
@@ -133,6 +139,7 @@ qt_add_executable(SmToolTests
     src/models/contentlistmodel.cpp
     src/models/contentstatuslistmodel.cpp
     src/models/dashboardmetricmodel.cpp
+    src/models/goalslistmodel.cpp
     src/models/lookuplistmodel.cpp
     src/models/serieslistmodel.cpp
     src/app/appsettings.cpp
@@ -146,6 +153,7 @@ qt_add_resources(SmToolTests smtool_test_resources
     PREFIX /
     FILES
         resources/migrations/001_initial.sql
+        resources/migrations/002_goals.sql
 )
 
 target_link_libraries(SmToolTests

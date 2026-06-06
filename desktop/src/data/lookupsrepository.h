@@ -15,6 +15,8 @@ public:
 
     [[nodiscard]] std::vector<Domain::LookupValue> activeLookups(const QString &tableName) const;
     [[nodiscard]] std::vector<Domain::ContentStatus> contentStatuses() const;
+    [[nodiscard]] std::vector<Domain::LookupValue> tags() const;
+    [[nodiscard]] std::vector<Domain::LookupValue> series() const;
     [[nodiscard]] QString lookupIdByKey(const QString &tableName, const QString &key) const;
 
 private:

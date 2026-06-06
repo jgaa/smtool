@@ -34,7 +34,7 @@ private:
     bool applyMigrations(QString *errorMessage);
     bool seedDefaults(QString *errorMessage);
     bool seedDemoData(QString *errorMessage);
-    [[nodiscard]] QString resourceMigrationPath() const;
+    [[nodiscard]] QString resourceMigrationPath(int version) const;
     [[nodiscard]] QString effectiveConnectionName() const;
 
     Options options_;

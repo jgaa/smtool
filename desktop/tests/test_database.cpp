@@ -3,6 +3,7 @@
 #include "data/contentrepository.h"
 #include "data/dashboardrepository.h"
 #include "data/database.h"
+#include "data/goalsrepository.h"
 #include "data/lookupsrepository.h"
 #include "data/mediarepository.h"
 #include "data/publicationrepository.h"
@@ -46,6 +47,7 @@ class DatabaseTests : public QObject
 
 private slots:
     void createsSchemaAndSeedsDefaults();
+    void createsGoalTablesAndAppliesLatestMigration();
     void seedsContentStatuses();
     void enforcesForeignKeys();
     void createsSeriesAndContentRelationships();
@@ -69,6 +71,8 @@ private slots:
     void contentModelBuildsDescriptionPreview();
     void publicationCrudWorks();
     void persistsMediaForContentAndPublication();
+    void goalCrudWorks();
+    void balanceGoalItemsPersistAndCascadeDelete();
 };
 
 void DatabaseTests::createsSchemaAndSeedsDefaults()
@@ -92,6 +96,29 @@ void DatabaseTests::createsSchemaAndSeedsDefaults()
     QVERIFY(query.exec(QStringLiteral("SELECT COUNT(*) FROM channel")));
     QVERIFY(query.next());
     QCOMPARE(query.value(0).toInt(), 10);
+}
+
+void DatabaseTests::createsGoalTablesAndAppliesLatestMigration()
+{
+    SmTool::Data::Database database({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-goal-schema"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    QSqlQuery query{database.connection()};
+    QVERIFY(query.exec(QStringLiteral("SELECT COALESCE(MAX(version), 0) FROM schema_migrations")));
+    QVERIFY(query.next());
+    QCOMPARE(query.value(0).toInt(), 2);
+
+    QVERIFY(query.exec(QStringLiteral("SELECT COUNT(*) FROM goals")));
+    QVERIFY(query.next());
+    QCOMPARE(query.value(0).toInt(), 0);
+
+    QVERIFY(query.exec(QStringLiteral("SELECT COUNT(*) FROM goal_balance_items")));
+    QVERIFY(query.next());
+    QCOMPARE(query.value(0).toInt(), 0);
 }
 
 void DatabaseTests::seedsContentStatuses()
@@ -1049,6 +1076,113 @@ void DatabaseTests::persistsMediaForContentAndPublication()
 
     QVERIFY2(contentRepository.remove(contentId, &errorMessage), qPrintable(errorMessage));
     QCOMPARE(static_cast<int>(mediaRepository.listForContent(contentId).size()), 0);
+}
+
+void DatabaseTests::goalCrudWorks()
+{
+    SmTool::Data::Database database({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-goals-crud"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto lookups = SmTool::Data::LookupsRepository{database.connection()};
+    auto goalsRepository = SmTool::Data::GoalsRepository{database.connection()};
+
+    const auto pillarId = lookups.lookupIdByKey(QStringLiteral("pillar"), QStringLiteral("product"));
+    QVERIFY(!pillarId.isEmpty());
+
+    const auto createdId = goalsRepository.createGoal({
+        .name = QStringLiteral("Product throughput"),
+        .goalType = QStringLiteral("count"),
+        .scopeType = QStringLiteral("pillar"),
+        .scopeId = pillarId,
+        .metricType = QStringLiteral("content_count"),
+        .targetValue = 4,
+        .periodType = QStringLiteral("month"),
+        .periodValue = 1,
+        .enabled = true,
+    }, &errorMessage);
+    QVERIFY2(!createdId.isEmpty(), qPrintable(errorMessage));
+
+    auto goal = goalsRepository.getGoal(createdId);
+    QCOMPARE(goal.name, QStringLiteral("Product throughput"));
+    QCOMPARE(goal.scopeType, QStringLiteral("pillar"));
+    QCOMPARE(goal.metricType, QStringLiteral("content_count"));
+    QCOMPARE(goal.scopeDisplayName, QStringLiteral("Product"));
+    QCOMPARE(goal.summaryText, QStringLiteral("Product: at least 4 content items per month"));
+
+    goal.targetValue = 6;
+    goal.periodType = QStringLiteral("week");
+    QVERIFY2(goalsRepository.updateGoal(goal, &errorMessage), qPrintable(errorMessage));
+    QVERIFY2(goalsRepository.setGoalEnabled(createdId, false, &errorMessage), qPrintable(errorMessage));
+
+    const auto updated = goalsRepository.getGoal(createdId);
+    QCOMPARE(updated.targetValue, 6);
+    QCOMPARE(updated.periodType, QStringLiteral("week"));
+    QCOMPARE(updated.enabled, false);
+
+    const auto listed = goalsRepository.listGoals();
+    QCOMPARE(static_cast<int>(listed.size()), 1);
+
+    QVERIFY2(goalsRepository.deleteGoal(createdId, &errorMessage), qPrintable(errorMessage));
+    QVERIFY(goalsRepository.getGoal(createdId).id.isEmpty());
+}
+
+void DatabaseTests::balanceGoalItemsPersistAndCascadeDelete()
+{
+    SmTool::Data::Database database({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-balance-goals"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto lookups = SmTool::Data::LookupsRepository{database.connection()};
+    auto goalsRepository = SmTool::Data::GoalsRepository{database.connection()};
+
+    const auto techPillarId = lookups.lookupIdByKey(QStringLiteral("pillar"), QStringLiteral("tech"));
+    const auto productPillarId = lookups.lookupIdByKey(QStringLiteral("pillar"), QStringLiteral("product"));
+    QVERIFY(!techPillarId.isEmpty());
+    QVERIFY(!productPillarId.isEmpty());
+
+    const auto goalId = goalsRepository.createGoal({
+        .name = QStringLiteral("Pillar Balance"),
+        .goalType = QStringLiteral("balance"),
+        .scopeType = QStringLiteral("pillar"),
+        .metricType = QStringLiteral("balance_weight"),
+        .enabled = true,
+    }, &errorMessage);
+    QVERIFY2(!goalId.isEmpty(), qPrintable(errorMessage));
+
+    QVERIFY2(goalsRepository.updateBalanceItems(goalId,
+                                                QStringLiteral("pillar"),
+                                                {
+                                                    {
+                                                        .scopeId = techPillarId,
+                                                        .weight = 5,
+                                                        .sortOrder = 0,
+                                                    },
+                                                    {
+                                                        .scopeId = productPillarId,
+                                                        .weight = 3,
+                                                        .sortOrder = 1,
+                                                    },
+                                                },
+                                                &errorMessage),
+             qPrintable(errorMessage));
+
+    const auto items = goalsRepository.listBalanceItems(goalId);
+    QCOMPARE(static_cast<int>(items.size()), 2);
+    QCOMPARE(items.at(0).scopeDisplayName, QStringLiteral("Tech"));
+    QCOMPARE(items.at(0).weight, 5);
+
+    const auto goal = goalsRepository.getGoal(goalId);
+    QCOMPARE(goal.summaryText, QStringLiteral("Pillar Balance: Tech 63%, Product 38%"));
+
+    QVERIFY2(goalsRepository.deleteGoal(goalId, &errorMessage), qPrintable(errorMessage));
+    QCOMPARE(static_cast<int>(goalsRepository.listBalanceItems(goalId).size()), 0);
 }
 
 QTEST_MAIN(DatabaseTests)

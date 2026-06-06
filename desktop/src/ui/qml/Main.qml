@@ -138,6 +138,12 @@ ApplicationWindow {
     }
 
     Action {
+        id: goalsAction
+        text: qsTr("Goals")
+        onTriggered: goalsDialog.open()
+    }
+
+    Action {
         id: settingsAction
         text: qsTr("Settings")
         shortcut: StandardKey.Preferences
@@ -892,6 +898,612 @@ ApplicationWindow {
     }
 
     Dialog {
+        id: goalsDialog
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        modal: true
+        focus: true
+        closePolicy: Popup.NoAutoClose
+        title: qsTr("Goals")
+        width: Math.min(window.width - 40, 1280)
+        height: Math.min(window.height - 40, 860)
+        property string selectedGoalId: ""
+        property string editingGoalId: ""
+        property bool editorActive: false
+        property var goalTypeOptions: [
+            { value: "count", label: "Count" },
+            { value: "cadence", label: "Cadence" },
+            { value: "balance", label: "Balance" }
+        ]
+        property var scopeTypeOptions: [
+            { value: "pillar", label: "Pillar" },
+            { value: "tag", label: "Tag" },
+            { value: "channel", label: "Channel" },
+            { value: "series", label: "Series" },
+            { value: "kind", label: "Kind" }
+        ]
+        property var periodTypeOptions: [
+            { value: "day", label: "day" },
+            { value: "week", label: "week" },
+            { value: "month", label: "month" },
+            { value: "quarter", label: "quarter" },
+            { value: "year", label: "year" },
+            { value: "rolling_days", label: "days" }
+        ]
+        property var scopeOptionsModel: []
+        property var balanceItemsModel: []
+
+        function metricTypeForScope(scopeType) {
+            return scopeType === "channel" ? "publication_count" : "content_count"
+        }
+
+        function metricLabel(scopeType, targetValue) {
+            const metricType = metricTypeForScope(scopeType)
+            if (metricType === "publication_count") {
+                return targetValue === 1 ? "publication" : "publications"
+            }
+            return targetValue === 1 ? "content item" : "content items"
+        }
+
+        function periodPreview() {
+            const periodType = periodTypeBox.currentValue || "week"
+            const periodValue = periodValueBox.value
+            if (periodType === "rolling_days") {
+                return periodValue + " days"
+            }
+            if (periodValue > 1) {
+                return periodValue + " " + periodType + "s"
+            }
+            return periodType
+        }
+
+        function summaryPreview() {
+            const name = goalNameField.text.trim()
+            const goalType = goalTypeBox.currentValue || "count"
+            const scopeType = scopeTypeBox.currentValue || "pillar"
+            if (goalType === "balance") {
+                const parts = []
+                const total = balanceItemsModel.reduce(function(sum, item) {
+                    return item.weight > 0 ? sum + item.weight : sum
+                }, 0)
+                for (let index = 0; index < balanceItemsModel.length; ++index) {
+                    const item = balanceItemsModel[index]
+                    if (item.weight <= 0 || total <= 0) {
+                        continue
+                    }
+                    parts.push(item.scopeDisplayName + " " + Math.round((item.weight * 100) / total) + "%")
+                }
+                return parts.length === 0 ? name : name + ": " + parts.join(", ")
+            }
+
+            const scopeName = scopeValueBox.currentIndex >= 0
+                ? scopeValueBox.currentText
+                : ""
+            const targetValue = targetValueBox.value
+            const qualifier = goalType === "cadence" ? "every" : "per"
+            return scopeName.length > 0
+                ? scopeName + ": at least " + targetValue + " " + metricLabel(scopeType, targetValue) + " " + qualifier + " " + periodPreview()
+                : name
+        }
+
+        function balancePercentage(item) {
+            if (!item || item.weight <= 0) {
+                return ""
+            }
+            const total = balanceItemsModel.reduce(function(sum, current) {
+                return current.weight > 0 ? sum + current.weight : sum
+            }, 0)
+            if (total <= 0) {
+                return ""
+            }
+            return Math.round((item.weight * 100) / total) + "%"
+        }
+
+        function refreshScopeOptions(preferredScopeId, preferredWeights) {
+            const scopeType = scopeTypeBox.currentValue || "pillar"
+            scopeOptionsModel = appController.goalScopeOptions(scopeType)
+
+            if ((goalTypeBox.currentValue || "count") === "balance") {
+                const weightById = {}
+                if (preferredWeights) {
+                    for (let index = 0; index < preferredWeights.length; ++index) {
+                        const weightedItem = preferredWeights[index]
+                        weightById[weightedItem.scopeId] = weightedItem.weight
+                    }
+                } else {
+                    for (let index = 0; index < balanceItemsModel.length; ++index) {
+                        const existingItem = balanceItemsModel[index]
+                        weightById[existingItem.scopeId] = existingItem.weight
+                    }
+                }
+
+                balanceItemsModel = scopeOptionsModel.map(function(option, index) {
+                    return {
+                        id: "",
+                        scopeId: option.lookupId,
+                        scopeDisplayName: option.displayName,
+                        weight: weightById[option.lookupId] !== undefined ? weightById[option.lookupId] : 0,
+                        sortOrder: index
+                    }
+                })
+                return
+            }
+
+            if (scopeOptionsModel.length === 0) {
+                scopeValueBox.currentIndex = -1
+                return
+            }
+
+            const targetScopeId = preferredScopeId && preferredScopeId.length > 0
+                ? preferredScopeId
+                : scopeOptionsModel[0].lookupId
+            const scopeIndex = scopeValueBox.indexOfValue(targetScopeId)
+            scopeValueBox.currentIndex = scopeIndex >= 0 ? scopeIndex : 0
+        }
+
+        function resetEditor(goalTypeValue) {
+            editorActive = true
+            editingGoalId = ""
+            goalNameField.clear()
+            goalEnabledBox.checked = true
+            const nextGoalType = goalTypeValue || "count"
+            const goalTypeIndex = goalTypeBox.indexOfValue(nextGoalType)
+            goalTypeBox.currentIndex = goalTypeIndex >= 0 ? goalTypeIndex : 0
+            scopeTypeBox.currentIndex = 0
+            targetValueBox.value = 1
+            periodValueBox.value = nextGoalType === "cadence" ? 7 : 1
+            const periodIndex = periodTypeBox.indexOfValue(nextGoalType === "cadence" ? "rolling_days" : "week")
+            periodTypeBox.currentIndex = periodIndex >= 0 ? periodIndex : 1
+            balanceItemsModel = []
+            refreshScopeOptions("", [])
+        }
+
+        function deactivateEditor() {
+            editorActive = false
+            editingGoalId = ""
+            goalNameField.clear()
+            goalEnabledBox.checked = true
+            scopeOptionsModel = []
+            balanceItemsModel = []
+        }
+
+        function editGoal(goalId) {
+            const goal = appController.goalDetails(goalId)
+            if (!goal.id) {
+                return
+            }
+
+            editorActive = true
+            editingGoalId = goal.id
+            selectedGoalId = goal.id
+            goalNameField.text = goal.name
+            goalEnabledBox.checked = goal.enabled
+
+            let index = goalTypeBox.indexOfValue(goal.goalType)
+            goalTypeBox.currentIndex = index >= 0 ? index : 0
+            index = scopeTypeBox.indexOfValue(goal.scopeType)
+            scopeTypeBox.currentIndex = index >= 0 ? index : 0
+
+            targetValueBox.value = goal.targetValue > 0 ? goal.targetValue : 1
+            periodValueBox.value = goal.periodValue > 0 ? goal.periodValue : 1
+            index = periodTypeBox.indexOfValue(goal.periodType.length > 0 ? goal.periodType : "week")
+            periodTypeBox.currentIndex = index >= 0 ? index : 1
+
+            refreshScopeOptions(goal.scopeId, goal.balanceItems || [])
+            if (goal.goalType !== "balance") {
+                index = scopeValueBox.indexOfValue(goal.scopeId)
+                scopeValueBox.currentIndex = index >= 0 ? index : 0
+            }
+        }
+
+        function saveEditor() {
+            const goalType = goalTypeBox.currentValue || "count"
+            const scopeType = scopeTypeBox.currentValue || "pillar"
+            const scopeId = goalType === "balance"
+                ? ""
+                : (scopeValueBox.currentIndex >= 0 ? scopeValueBox.currentValue : "")
+            const balanceItems = goalType === "balance"
+                ? balanceItemsModel
+                : []
+            const ok = appController.saveGoal({
+                id: editingGoalId,
+                name: goalNameField.text,
+                goalType: goalType,
+                scopeType: scopeType,
+                scopeId: scopeId,
+                metricType: metricTypeForScope(scopeType),
+                targetValue: targetValueBox.value,
+                periodType: periodTypeBox.currentValue || "week",
+                periodValue: periodValueBox.value,
+                enabled: goalEnabledBox.checked
+            }, balanceItems)
+            if (ok) {
+                goalsDialog.deactivateEditor()
+            }
+        }
+
+        onOpened: goalsDialog.deactivateEditor()
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 20
+            spacing: 16
+
+            RowLayout {
+                Layout.fillWidth: true
+
+                Button {
+                    text: "Add Goal"
+                    onClicked: goalsDialog.resetEditor("count")
+                }
+
+                Button {
+                    text: "Add Balance Goal"
+                    onClicked: goalsDialog.resetEditor("balance")
+                }
+
+                Item { Layout.fillWidth: true }
+
+                Button {
+                    text: "Close"
+                    onClicked: goalsDialog.close()
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                spacing: 16
+
+                Frame {
+                    Layout.preferredWidth: 470
+                    Layout.fillHeight: true
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        spacing: 12
+
+                        Label {
+                            text: "Configured Goals"
+                            font.bold: true
+                        }
+
+                        ListView {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            clip: true
+                            model: appController.goalsModel
+                            spacing: 8
+
+                            delegate: Rectangle {
+                                required property string goalId
+                                required property string summaryText
+                                required property string goalType
+                                required property string scopeType
+                                required property bool enabled
+                                width: ListView.view.width
+                                implicitHeight: goalRow.implicitHeight + 12
+                                radius: 6
+                                color: goalsDialog.selectedGoalId === goalId ? "#eef5ff" : "#ffffff"
+                                border.color: goalsDialog.selectedGoalId === goalId ? "#4e79a7" : "#d6d6d6"
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: goalsDialog.selectedGoalId = goalId
+                                    onDoubleClicked: goalsDialog.editGoal(goalId)
+                                }
+
+                                RowLayout {
+                                    id: goalRow
+                                    anchors.fill: parent
+                                    anchors.margins: 6
+                                    spacing: 8
+
+                                    CheckBox {
+                                        checked: enabled
+                                        z: 1
+                                        onToggled: appController.setGoalEnabled(goalId, checked)
+                                    }
+
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+
+                                        Label {
+                                            Layout.fillWidth: true
+                                            text: summaryText
+                                            wrapMode: Text.Wrap
+                                            font.bold: true
+                                        }
+
+                                        Label {
+                                            text: goalType + " | " + scopeType
+                                            color: "#666666"
+                                        }
+                                    }
+
+                                    Button {
+                                        text: "Edit"
+                                        z: 1
+                                        onClicked: goalsDialog.editGoal(goalId)
+                                    }
+
+                                    Button {
+                                        text: "Del"
+                                        z: 1
+                                        onClicked: {
+                                            if (appController.deleteGoal(goalId)) {
+                                                if (goalsDialog.selectedGoalId === goalId) {
+                                                    goalsDialog.selectedGoalId = ""
+                                                }
+                                                if (goalsDialog.editingGoalId === goalId) {
+                                                    goalsDialog.deactivateEditor()
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Frame {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        spacing: 16
+
+                        Label {
+                            text: !goalsDialog.editorActive
+                                ? "Goal Editor"
+                                : (goalsDialog.editingGoalId.length > 0 ? "Edit Goal" : "New Goal")
+                            font.bold: true
+                        }
+
+                        ScrollView {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            enabled: goalsDialog.editorActive
+                            opacity: goalsDialog.editorActive ? 1.0 : 0.45
+                            clip: true
+                            contentWidth: availableWidth
+
+                            ColumnLayout {
+                                width: parent.width
+                                spacing: 16
+
+                                Label {
+                                    Layout.fillWidth: true
+                                    visible: !goalsDialog.editorActive
+                                    wrapMode: Text.Wrap
+                                    text: "Select an existing goal to edit, or click Add Goal / Add Balance Goal to start a new one."
+                                    color: "#666666"
+                                }
+
+                                GridLayout {
+                                    columns: 2
+                                    columnSpacing: 12
+                                    rowSpacing: 12
+                                    Layout.fillWidth: true
+
+                                    Label { text: "Name" }
+                                    TextField {
+                                        id: goalNameField
+                                        Layout.fillWidth: true
+                                        placeholderText: "Goal name"
+                                    }
+
+                                    Label { text: "Goal Type" }
+                                    ComboBox {
+                                        id: goalTypeBox
+                                        Layout.fillWidth: true
+                                        model: goalsDialog.goalTypeOptions
+                                        textRole: "label"
+                                        valueRole: "value"
+                                        onActivated: {
+                                            if (currentValue === "balance") {
+                                                const rollingIndex = periodTypeBox.indexOfValue("rolling_days")
+                                                periodTypeBox.currentIndex = rollingIndex >= 0 ? rollingIndex : 0
+                                            }
+                                            goalsDialog.refreshScopeOptions("", [])
+                                        }
+                                    }
+
+                                    Label { text: "Track" }
+                                    ComboBox {
+                                        id: scopeTypeBox
+                                        Layout.fillWidth: true
+                                        model: goalsDialog.scopeTypeOptions
+                                        textRole: "label"
+                                        valueRole: "value"
+                                        onActivated: goalsDialog.refreshScopeOptions("", [])
+                                    }
+
+                                    Label {
+                                        text: "Which"
+                                        visible: goalTypeBox.currentValue !== "balance"
+                                    }
+                                    ComboBox {
+                                        id: scopeValueBox
+                                        Layout.fillWidth: true
+                                        visible: goalTypeBox.currentValue !== "balance"
+                                        model: goalsDialog.scopeOptionsModel
+                                        textRole: "displayName"
+                                        valueRole: "lookupId"
+                                    }
+
+                                    Label {
+                                        text: "Metric"
+                                        visible: goalTypeBox.currentValue !== "balance"
+                                    }
+                                    Label {
+                                        Layout.fillWidth: true
+                                        visible: goalTypeBox.currentValue !== "balance"
+                                        text: goalsDialog.metricTypeForScope(scopeTypeBox.currentValue || "pillar") === "publication_count"
+                                            ? "Publications"
+                                            : "Content items"
+                                    }
+
+                                    Label {
+                                        text: "Target"
+                                        visible: goalTypeBox.currentValue !== "balance"
+                                    }
+                                    SpinBox {
+                                        id: targetValueBox
+                                        visible: goalTypeBox.currentValue !== "balance"
+                                        from: 1
+                                        to: 1000
+                                        value: 1
+                                    }
+
+                                    Label {
+                                        text: "Period"
+                                        visible: goalTypeBox.currentValue !== "balance"
+                                    }
+                                    RowLayout {
+                                        visible: goalTypeBox.currentValue !== "balance"
+
+                                        SpinBox {
+                                            id: periodValueBox
+                                            from: 1
+                                            to: 365
+                                            value: 1
+                                        }
+
+                                        ComboBox {
+                                            id: periodTypeBox
+                                            Layout.preferredWidth: 180
+                                            model: goalsDialog.periodTypeOptions
+                                            textRole: "label"
+                                            valueRole: "value"
+                                        }
+                                    }
+
+                                    Label { text: "Enabled" }
+                                    CheckBox {
+                                        id: goalEnabledBox
+                                        checked: true
+                                    }
+                                }
+
+                                Frame {
+                                    Layout.fillWidth: true
+                                    visible: goalTypeBox.currentValue === "balance"
+
+                                    ColumnLayout {
+                                        anchors.fill: parent
+                                        spacing: 12
+
+                                        Label {
+                                            text: "Balance Items"
+                                            font.bold: true
+                                        }
+
+                                        Label {
+                                            Layout.fillWidth: true
+                                            text: "Use integer weights. Items with zero weight are excluded from the balance."
+                                            wrapMode: Text.Wrap
+                                            color: "#666666"
+                                        }
+
+                                        Repeater {
+                                            model: goalsDialog.balanceItemsModel
+
+                                            delegate: RowLayout {
+                                                required property var modelData
+                                                required property int index
+                                                Layout.fillWidth: true
+
+                                                Label {
+                                                    Layout.preferredWidth: 180
+                                                    text: modelData.scopeDisplayName
+                                                }
+
+                                                Slider {
+                                                    Layout.fillWidth: true
+                                                    from: 0
+                                                    to: 10
+                                                    stepSize: 1
+                                                    value: modelData.weight
+                                                    onMoved: {
+                                                        const nextItems = goalsDialog.balanceItemsModel.slice()
+                                                        nextItems[index] = {
+                                                            id: modelData.id,
+                                                            scopeId: modelData.scopeId,
+                                                            scopeDisplayName: modelData.scopeDisplayName,
+                                                            weight: Math.round(value),
+                                                            sortOrder: modelData.sortOrder
+                                                        }
+                                                        goalsDialog.balanceItemsModel = nextItems
+                                                    }
+                                                }
+
+                                                SpinBox {
+                                                    from: 0
+                                                    to: 10
+                                                    value: modelData.weight
+                                                    onValueModified: {
+                                                        const nextItems = goalsDialog.balanceItemsModel.slice()
+                                                        nextItems[index] = {
+                                                            id: modelData.id,
+                                                            scopeId: modelData.scopeId,
+                                                            scopeDisplayName: modelData.scopeDisplayName,
+                                                            weight: value,
+                                                            sortOrder: modelData.sortOrder
+                                                        }
+                                                        goalsDialog.balanceItemsModel = nextItems
+                                                    }
+                                                }
+
+                                                Label {
+                                                    Layout.preferredWidth: 56
+                                                    horizontalAlignment: Text.AlignRight
+                                                    text: goalsDialog.balancePercentage(modelData)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Frame {
+                                    Layout.fillWidth: true
+
+                                    ColumnLayout {
+                                        anchors.fill: parent
+                                        spacing: 8
+
+                                        Label {
+                                            text: "Preview"
+                                            font.bold: true
+                                        }
+
+                                        Label {
+                                            Layout.fillWidth: true
+                                            wrapMode: Text.Wrap
+                                            text: goalsDialog.summaryPreview()
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        DialogButtonBox {
+                            Layout.fillWidth: true
+                            enabled: goalsDialog.editorActive
+                            standardButtons: DialogButtonBox.Save | DialogButtonBox.Cancel
+
+                            onAccepted: goalsDialog.saveEditor()
+                            onRejected: goalsDialog.deactivateEditor()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Dialog {
         id: createSeriesDialog
         parent: Overlay.overlay
         anchors.centerIn: parent
@@ -973,6 +1585,7 @@ ApplicationWindow {
 
             MenuSeparator {}
 
+            MenuItem { action: goalsAction }
             MenuItem { action: settingsAction }
 
             MenuSeparator {}

@@ -1,6 +1,7 @@
 #include "app/appcontroller.h"
 
 #include "app/loggingcontroller.h"
+#include "domain/constants.h"
 
 #include <QClipboard>
 #include <QDesktopServices>
@@ -217,6 +218,17 @@ QDateTime parseOptionalDateTime(const QString &value)
     return {};
 }
 
+QString metricTypeForScope(const QString &scopeType)
+{
+    return scopeType == "channel"_L1 ? QStringLiteral("publication_count")
+                                     : QStringLiteral("content_count");
+}
+
+bool goalTypeNeedsTarget(const QString &goalType)
+{
+    return goalType == "count"_L1 || goalType == "cadence"_L1;
+}
+
 } // namespace
 
 AppController::AppController(Data::Database::Options databaseOptions, QObject *parent)
@@ -264,8 +276,11 @@ Models::ContentListModel *AppController::sourceModel() { return &sourceModel_; }
 Models::ContentListModel *AppController::derivativeModel() { return &derivativeModel_; }
 Models::SeriesListModel *AppController::seriesModel() { return &seriesModel_; }
 Models::LookupListModel *AppController::pillarModel() { return &pillarModel_; }
+Models::LookupListModel *AppController::tagModel() { return &tagModel_; }
 Models::LookupListModel *AppController::kindModel() { return &kindModel_; }
 Models::LookupListModel *AppController::channelModel() { return &channelModel_; }
+Models::LookupListModel *AppController::goalSeriesModel() { return &goalSeriesModel_; }
+Models::GoalsListModel *AppController::goalsModel() { return &goalsModel_; }
 Models::DashboardMetricModel *AppController::dashboardByPillarModel() { return &dashboardByPillarModel_; }
 Models::DashboardMetricModel *AppController::dashboardBySeriesModel() { return &dashboardBySeriesModel_; }
 Models::DashboardMetricModel *AppController::dashboardByStatusModel() { return &dashboardByStatusModel_; }
@@ -393,6 +408,7 @@ bool AppController::refreshAll()
     refreshSources();
     refreshDerivatives();
     refreshSeries();
+    refreshGoals();
     refreshDashboard();
     return true;
 }
@@ -661,6 +677,238 @@ QVariantMap AppController::publicationDetails(const QString &publicationId) cons
         {QStringLiteral("url"), publication.url},
         {QStringLiteral("media"), mediaVariantList(mediaRepository_->listForPublication(publicationId))},
     };
+}
+
+QVariantMap AppController::goalDetails(const QString &goalId) const
+{
+    if (!goalsRepository_) {
+        return {};
+    }
+
+    const auto goal = goalsRepository_->getGoal(goalId);
+    if (goal.id.isEmpty()) {
+        return {};
+    }
+
+    QVariantList balanceItems;
+    for (const auto &item : goalsRepository_->listBalanceItems(goalId)) {
+        balanceItems.push_back(QVariantMap{
+            {QStringLiteral("id"), item.id},
+            {QStringLiteral("goalId"), item.goalId},
+            {QStringLiteral("scopeType"), item.scopeType},
+            {QStringLiteral("scopeId"), item.scopeId},
+            {QStringLiteral("scopeDisplayName"), item.scopeDisplayName},
+            {QStringLiteral("weight"), item.weight},
+            {QStringLiteral("sortOrder"), item.sortOrder},
+        });
+    }
+
+    return {
+        {QStringLiteral("id"), goal.id},
+        {QStringLiteral("name"), goal.name},
+        {QStringLiteral("goalType"), goal.goalType},
+        {QStringLiteral("scopeType"), goal.scopeType},
+        {QStringLiteral("scopeId"), goal.scopeId},
+        {QStringLiteral("scopeDisplayName"), goal.scopeDisplayName},
+        {QStringLiteral("metricType"), goal.metricType},
+        {QStringLiteral("targetValue"), goal.targetValue},
+        {QStringLiteral("periodType"), goal.periodType},
+        {QStringLiteral("periodValue"), goal.periodValue},
+        {QStringLiteral("enabled"), goal.enabled},
+        {QStringLiteral("summaryText"), goal.summaryText},
+        {QStringLiteral("balanceItems"), balanceItems},
+    };
+}
+
+QVariantList AppController::goalScopeOptions(const QString &scopeType) const
+{
+    if (!lookupsRepository_) {
+        return {};
+    }
+
+    std::vector<Domain::LookupValue> items;
+    if (scopeType == "pillar"_L1) {
+        items = lookupsRepository_->activeLookups(QStringLiteral("pillar"));
+    } else if (scopeType == "tag"_L1) {
+        items = lookupsRepository_->tags();
+    } else if (scopeType == "channel"_L1) {
+        items = lookupsRepository_->activeLookups(QStringLiteral("channel"));
+    } else if (scopeType == "series"_L1) {
+        items = lookupsRepository_->series();
+    } else if (scopeType == "kind"_L1) {
+        items = lookupsRepository_->activeLookups(QStringLiteral("content_kind"));
+    }
+
+    QVariantList result;
+    result.reserve(static_cast<qsizetype>(items.size()));
+    for (const auto &item : items) {
+        result.push_back(QVariantMap{
+            {QStringLiteral("lookupId"), item.id},
+            {QStringLiteral("key"), item.key},
+            {QStringLiteral("displayName"), item.displayName},
+            {QStringLiteral("description"), item.description},
+            {QStringLiteral("sortOrder"), item.sortOrder},
+            {QStringLiteral("isActive"), item.isActive},
+        });
+    }
+    return result;
+}
+
+bool AppController::saveGoal(const QVariantMap &goalData, const QVariantList &balanceItems)
+{
+    if (!goalsRepository_) {
+        setStatusMessage(QStringLiteral("Goals repository is not available."));
+        return false;
+    }
+
+    Domain::Goal goal{
+        .id = goalData.value(QStringLiteral("id")).toString().trimmed(),
+        .name = goalData.value(QStringLiteral("name")).toString().trimmed(),
+        .goalType = goalData.value(QStringLiteral("goalType")).toString().trimmed(),
+        .scopeType = goalData.value(QStringLiteral("scopeType")).toString().trimmed(),
+        .scopeId = goalData.value(QStringLiteral("scopeId")).toString().trimmed(),
+        .metricType = goalData.value(QStringLiteral("metricType")).toString().trimmed(),
+        .targetValue = goalData.value(QStringLiteral("targetValue")).toInt(),
+        .periodType = goalData.value(QStringLiteral("periodType")).toString().trimmed(),
+        .periodValue = goalData.value(QStringLiteral("periodValue")).toInt(),
+        .enabled = goalData.value(QStringLiteral("enabled"), true).toBool(),
+    };
+
+    if (goal.name.isEmpty()) {
+        setStatusMessage(QStringLiteral("Goal name is required."));
+        return false;
+    }
+    if (!Domain::isValidGoalType(goal.goalType)) {
+        setStatusMessage(QStringLiteral("Invalid goal type."));
+        return false;
+    }
+    if (!Domain::isValidGoalScopeType(goal.scopeType)) {
+        setStatusMessage(QStringLiteral("Invalid scope type."));
+        return false;
+    }
+
+    if (goal.goalType == "balance"_L1) {
+        goal.metricType = QStringLiteral("balance_weight");
+        goal.targetValue = 0;
+        goal.periodType.clear();
+        goal.periodValue = 0;
+        goal.scopeId.clear();
+    } else {
+        goal.metricType = metricTypeForScope(goal.scopeType);
+        if (goal.scopeId.isEmpty() || !goalsRepository_->scopeExists(goal.scopeType, goal.scopeId)) {
+            setStatusMessage(QStringLiteral("Select a valid goal target."));
+            return false;
+        }
+        if (!goalTypeNeedsTarget(goal.goalType) || goal.targetValue <= 0) {
+            setStatusMessage(QStringLiteral("Target value must be positive."));
+            return false;
+        }
+        if (!Domain::isValidGoalPeriodType(goal.periodType) || goal.periodValue <= 0) {
+            setStatusMessage(QStringLiteral("Select a valid period."));
+            return false;
+        }
+    }
+
+    std::vector<Domain::GoalBalanceItem> parsedBalanceItems;
+    if (goal.goalType == "balance"_L1) {
+        parsedBalanceItems.reserve(static_cast<std::size_t>(balanceItems.size()));
+        int positiveCount = 0;
+        for (const auto &value : balanceItems) {
+            const auto itemMap = value.toMap();
+            Domain::GoalBalanceItem item{
+                .id = itemMap.value(QStringLiteral("id")).toString().trimmed(),
+                .scopeType = goal.scopeType,
+                .scopeId = itemMap.value(QStringLiteral("scopeId")).toString().trimmed(),
+                .scopeDisplayName = itemMap.value(QStringLiteral("scopeDisplayName")).toString().trimmed(),
+                .weight = std::max(0, itemMap.value(QStringLiteral("weight")).toInt()),
+                .sortOrder = itemMap.value(QStringLiteral("sortOrder")).toInt(),
+            };
+            if (item.scopeId.isEmpty() || !goalsRepository_->scopeExists(goal.scopeType, item.scopeId)) {
+                setStatusMessage(QStringLiteral("Balance goal contains an invalid scope item."));
+                return false;
+            }
+            if (item.weight > 0) {
+                ++positiveCount;
+            }
+            parsedBalanceItems.push_back(std::move(item));
+        }
+        if (positiveCount == 0) {
+            setStatusMessage(QStringLiteral("Balance goals need at least one item with weight above zero."));
+            return false;
+        }
+    }
+
+    QString errorMessage;
+    auto db = database_.connection();
+    if (!beginSavepoint(db, QStringLiteral("app_goal_save"), &errorMessage)) {
+        setStatusMessage(errorMessage.isEmpty() ? QStringLiteral("Could not start goal save.") : errorMessage);
+        return false;
+    }
+
+    const auto goalId = goal.id.isEmpty()
+        ? goalsRepository_->createGoal(goal, &errorMessage)
+        : (goalsRepository_->updateGoal(goal, &errorMessage) ? goal.id : QString{});
+    if (goalId.isEmpty()) {
+        rollbackSavepoint(db, QStringLiteral("app_goal_save"));
+        setStatusMessage(errorMessage);
+        return false;
+    }
+    if (goal.goalType == "balance"_L1) {
+        if (!goalsRepository_->updateBalanceItems(goalId, goal.scopeType, parsedBalanceItems, &errorMessage)) {
+            rollbackSavepoint(db, QStringLiteral("app_goal_save"));
+            setStatusMessage(errorMessage);
+            return false;
+        }
+    } else if (!goalsRepository_->updateBalanceItems(goalId, goal.scopeType, {}, &errorMessage)) {
+        rollbackSavepoint(db, QStringLiteral("app_goal_save"));
+        setStatusMessage(errorMessage);
+        return false;
+    }
+    if (!releaseSavepoint(db, QStringLiteral("app_goal_save"), &errorMessage)) {
+        rollbackSavepoint(db, QStringLiteral("app_goal_save"));
+        setStatusMessage(errorMessage.isEmpty() ? QStringLiteral("Could not save goal.") : errorMessage);
+        return false;
+    }
+
+    refreshGoals();
+    setStatusMessage(goal.id.isEmpty() ? QStringLiteral("Goal created.") : QStringLiteral("Goal updated."));
+    return true;
+}
+
+bool AppController::deleteGoal(const QString &goalId)
+{
+    if (goalId.trimmed().isEmpty()) {
+        setStatusMessage(QStringLiteral("Goal id is required."));
+        return false;
+    }
+
+    QString errorMessage;
+    if (!goalsRepository_->deleteGoal(goalId, &errorMessage)) {
+        setStatusMessage(errorMessage);
+        return false;
+    }
+
+    refreshGoals();
+    setStatusMessage(QStringLiteral("Goal removed."));
+    return true;
+}
+
+bool AppController::setGoalEnabled(const QString &goalId, bool enabled)
+{
+    if (goalId.trimmed().isEmpty()) {
+        setStatusMessage(QStringLiteral("Goal id is required."));
+        return false;
+    }
+
+    QString errorMessage;
+    if (!goalsRepository_->setGoalEnabled(goalId, enabled, &errorMessage)) {
+        setStatusMessage(errorMessage);
+        return false;
+    }
+
+    refreshGoals();
+    setStatusMessage(enabled ? QStringLiteral("Goal enabled.") : QStringLiteral("Goal disabled."));
+    return true;
 }
 
 bool AppController::updateContent(const QString &contentId,
@@ -1236,6 +1484,7 @@ void AppController::initializeRepositories()
     publicationRepository_ = std::make_unique<Data::PublicationRepository>(db);
     seriesRepository_ = std::make_unique<Data::SeriesRepository>(db);
     contentRepository_ = std::make_unique<Data::ContentRepository>(db);
+    goalsRepository_ = std::make_unique<Data::GoalsRepository>(db);
     dashboardRepository_ = std::make_unique<Data::DashboardRepository>(db);
 }
 
@@ -1247,6 +1496,7 @@ void AppController::resetRepositories()
     publicationRepository_.reset();
     mediaRepository_.reset();
     lookupsRepository_.reset();
+    goalsRepository_.reset();
 }
 
 void AppController::loadLookupModels()
@@ -1256,8 +1506,10 @@ void AppController::loadLookupModels()
     }
 
     pillarModel_.setItems(lookupsRepository_->activeLookups(QStringLiteral("pillar")));
+    tagModel_.setItems(lookupsRepository_->tags());
     kindModel_.setItems(lookupsRepository_->activeLookups(QStringLiteral("content_kind")));
     channelModel_.setItems(lookupsRepository_->activeLookups(QStringLiteral("channel")));
+    goalSeriesModel_.setItems(lookupsRepository_->series());
     syncContentStatusModels();
 }
 
@@ -1329,6 +1581,11 @@ void AppController::refreshDerivatives()
 void AppController::refreshSeries()
 {
     seriesModel_.setItems(seriesRepository_->list(boardShowArchived_, searchQuery_));
+}
+
+void AppController::refreshGoals()
+{
+    goalsModel_.setItems(goalsRepository_ ? goalsRepository_->listGoals() : std::vector<Domain::Goal>{});
 }
 
 void AppController::refreshDashboard()

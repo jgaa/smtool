@@ -3,6 +3,7 @@
 #include "data/contentrepository.h"
 #include "data/dashboardrepository.h"
 #include "data/database.h"
+#include "data/goalsrepository.h"
 #include "data/lookupsrepository.h"
 #include "data/mediarepository.h"
 #include "data/publicationrepository.h"
@@ -11,6 +12,7 @@
 #include "models/contentlistmodel.h"
 #include "models/contentstatuslistmodel.h"
 #include "models/dashboardmetricmodel.h"
+#include "models/goalslistmodel.h"
 #include "models/lookuplistmodel.h"
 #include "models/serieslistmodel.h"
 
@@ -34,8 +36,11 @@ class AppController : public QObject
     Q_PROPERTY(SmTool::Models::ContentListModel *derivativeModel READ derivativeModel CONSTANT)
     Q_PROPERTY(SmTool::Models::SeriesListModel *seriesModel READ seriesModel CONSTANT)
     Q_PROPERTY(SmTool::Models::LookupListModel *pillarModel READ pillarModel CONSTANT)
+    Q_PROPERTY(SmTool::Models::LookupListModel *tagModel READ tagModel CONSTANT)
     Q_PROPERTY(SmTool::Models::LookupListModel *kindModel READ kindModel CONSTANT)
     Q_PROPERTY(SmTool::Models::LookupListModel *channelModel READ channelModel CONSTANT)
+    Q_PROPERTY(SmTool::Models::LookupListModel *goalSeriesModel READ goalSeriesModel CONSTANT)
+    Q_PROPERTY(SmTool::Models::GoalsListModel *goalsModel READ goalsModel CONSTANT)
     Q_PROPERTY(SmTool::Models::DashboardMetricModel *dashboardByPillarModel READ dashboardByPillarModel CONSTANT)
     Q_PROPERTY(SmTool::Models::DashboardMetricModel *dashboardBySeriesModel READ dashboardBySeriesModel CONSTANT)
     Q_PROPERTY(SmTool::Models::DashboardMetricModel *dashboardByStatusModel READ dashboardByStatusModel CONSTANT)
@@ -67,8 +72,11 @@ public:
     [[nodiscard]] Models::ContentListModel *derivativeModel();
     [[nodiscard]] Models::SeriesListModel *seriesModel();
     [[nodiscard]] Models::LookupListModel *pillarModel();
+    [[nodiscard]] Models::LookupListModel *tagModel();
     [[nodiscard]] Models::LookupListModel *kindModel();
     [[nodiscard]] Models::LookupListModel *channelModel();
+    [[nodiscard]] Models::LookupListModel *goalSeriesModel();
+    [[nodiscard]] Models::GoalsListModel *goalsModel();
     [[nodiscard]] Models::DashboardMetricModel *dashboardByPillarModel();
     [[nodiscard]] Models::DashboardMetricModel *dashboardBySeriesModel();
     [[nodiscard]] Models::DashboardMetricModel *dashboardByStatusModel();
@@ -120,6 +128,11 @@ public:
     Q_INVOKABLE QObject *boardModelForStatus(const QString &statusId) const;
     Q_INVOKABLE QVariantMap contentDetails(const QString &contentId) const;
     Q_INVOKABLE QVariantMap publicationDetails(const QString &publicationId) const;
+    Q_INVOKABLE QVariantMap goalDetails(const QString &goalId) const;
+    Q_INVOKABLE QVariantList goalScopeOptions(const QString &scopeType) const;
+    Q_INVOKABLE bool saveGoal(const QVariantMap &goalData, const QVariantList &balanceItems);
+    Q_INVOKABLE bool deleteGoal(const QString &goalId);
+    Q_INVOKABLE bool setGoalEnabled(const QString &goalId, bool enabled);
     Q_INVOKABLE bool updateContent(const QString &contentId,
                                    const QString &title,
                                    const QString &description,
@@ -184,6 +197,7 @@ private:
     void refreshSources();
     void refreshDerivatives();
     void refreshSeries();
+    void refreshGoals();
     void refreshDashboard();
     void refreshClipboardHasText();
     void setStatusMessage(const QString &message);
@@ -207,6 +221,7 @@ private:
     std::unique_ptr<Data::PublicationRepository> publicationRepository_;
     std::unique_ptr<Data::SeriesRepository> seriesRepository_;
     std::unique_ptr<Data::ContentRepository> contentRepository_;
+    std::unique_ptr<Data::GoalsRepository> goalsRepository_;
     std::unique_ptr<Data::DashboardRepository> dashboardRepository_;
 
     Models::ContentListModel inboxModel_;
@@ -217,8 +232,11 @@ private:
     Models::ContentListModel derivativeModel_;
     Models::SeriesListModel seriesModel_;
     Models::LookupListModel pillarModel_;
+    Models::LookupListModel tagModel_;
     Models::LookupListModel kindModel_;
     Models::LookupListModel channelModel_;
+    Models::LookupListModel goalSeriesModel_;
+    Models::GoalsListModel goalsModel_;
     Models::DashboardMetricModel dashboardByPillarModel_;
     Models::DashboardMetricModel dashboardBySeriesModel_;
     Models::DashboardMetricModel dashboardByStatusModel_;

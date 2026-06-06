@@ -566,54 +566,65 @@ bool Database::applyMigrations(QString *errorMessage)
     }
 
     const auto currentVersion = currentVersionQuery.value(0).toInt();
-    if (currentVersion >= 1) {
+    constexpr int latestVersion = 2;
+    if (currentVersion >= latestVersion) {
         return true;
     }
 
-    QFile migrationFile{resourceMigrationPath()};
-    if (!migrationFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        if (errorMessage != nullptr) {
-            *errorMessage = QStringLiteral("Unable to open migration file: %1").arg(resourceMigrationPath());
-        }
-        return false;
-    }
-
-    const auto migrationSql = QString::fromUtf8(migrationFile.readAll());
-    const auto statements = splitSqlStatements(migrationSql);
-    auto db = connection();
-    if (!db.transaction()) {
-        if (errorMessage != nullptr) {
-            *errorMessage = db.lastError().text();
-        }
-        return false;
-    }
-
-    for (const auto &rawStatement : statements) {
-        const auto statement = rawStatement.trimmed();
-        if (statement.isEmpty()) {
-            continue;
-        }
-
-        QSqlQuery migrationQuery{db};
-        if (!migrationQuery.exec(statement)) {
-            db.rollback();
+    for (int version = currentVersion + 1; version <= latestVersion; ++version) {
+        QFile migrationFile{resourceMigrationPath(version)};
+        if (!migrationFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
             if (errorMessage != nullptr) {
-                *errorMessage = migrationQuery.lastError().text();
+                *errorMessage = QStringLiteral("Unable to open migration file: %1").arg(resourceMigrationPath(version));
+            }
+            return false;
+        }
+
+        const auto migrationSql = QString::fromUtf8(migrationFile.readAll());
+        const auto statements = splitSqlStatements(migrationSql);
+        auto db = connection();
+        if (!db.transaction()) {
+            if (errorMessage != nullptr) {
+                *errorMessage = db.lastError().text();
+            }
+            return false;
+        }
+
+        for (const auto &rawStatement : statements) {
+            const auto statement = rawStatement.trimmed();
+            if (statement.isEmpty()) {
+                continue;
+            }
+
+            QSqlQuery migrationQuery{db};
+            if (!migrationQuery.exec(statement)) {
+                db.rollback();
+                if (errorMessage != nullptr) {
+                    *errorMessage = migrationQuery.lastError().text();
+                }
+                return false;
+            }
+        }
+
+        QSqlQuery insertVersionQuery{db};
+        insertVersionQuery.prepare(QStringLiteral(
+            "INSERT INTO schema_migrations(version, applied_at) VALUES (:version, :applied_at)"));
+        insertVersionQuery.bindValue(":version"_L1, version);
+        insertVersionQuery.bindValue(":applied_at"_L1, nowIso());
+        if (!executeQuery(insertVersionQuery, errorMessage)) {
+            db.rollback();
+            return false;
+        }
+
+        if (!db.commit()) {
+            if (errorMessage != nullptr) {
+                *errorMessage = db.lastError().text();
             }
             return false;
         }
     }
 
-    QSqlQuery insertVersionQuery{db};
-    insertVersionQuery.prepare(QStringLiteral(
-        "INSERT INTO schema_migrations(version, applied_at) VALUES (1, :applied_at)"));
-    insertVersionQuery.bindValue(":applied_at"_L1, nowIso());
-    if (!executeQuery(insertVersionQuery, errorMessage)) {
-        db.rollback();
-        return false;
-    }
-
-    return db.commit();
+    return true;
 }
 
 bool Database::seedDefaults(QString *errorMessage)
@@ -794,9 +805,16 @@ bool Database::seedDemoData(QString *errorMessage)
     return db.commit();
 }
 
-QString Database::resourceMigrationPath() const
+QString Database::resourceMigrationPath(int version) const
 {
-    return QStringLiteral(":/resources/migrations/001_initial.sql");
+    switch (version) {
+    case 1:
+        return QStringLiteral(":/resources/migrations/001_initial.sql");
+    case 2:
+        return QStringLiteral(":/resources/migrations/002_goals.sql");
+    default:
+        return {};
+    }
 }
 
 QString Database::effectiveConnectionName() const
