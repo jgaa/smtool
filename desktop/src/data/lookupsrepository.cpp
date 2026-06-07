@@ -78,13 +78,15 @@ std::vector<Domain::LookupValue> LookupsRepository::tags() const
     return results;
 }
 
-std::vector<Domain::LookupValue> LookupsRepository::series() const
+std::vector<Domain::LookupValue> LookupsRepository::series(bool includeArchived) const
 {
     QSqlQuery query{database_};
     query.prepare(QStringLiteral(
         "SELECT id, name, COALESCE(description, '') "
         "FROM series "
+        "WHERE (:include_archived = 1 OR status != 'archived') "
         "ORDER BY name COLLATE NOCASE ASC"));
+    query.bindValue(":include_archived", includeArchived ? 1 : 0);
     query.exec();
 
     std::vector<Domain::LookupValue> results;

@@ -90,6 +90,8 @@ QVariant ContentListModel::data(const QModelIndex &index, int role) const
         return item.status;
     case PriorityRole:
         return item.priority;
+    case SeriesPositionRole:
+        return item.hasSeriesPosition ? QVariant{item.seriesPosition} : QVariant{};
     case ScheduledAtRole:
         return item.scheduledAt;
     case PublishedAtRole:
@@ -117,6 +119,7 @@ QHash<int, QByteArray> ContentListModel::roleNames() const
         {SuggestedChannelRole, "suggestedChannel"},
         {StatusRole, "status"},
         {PriorityRole, "priority"},
+        {SeriesPositionRole, "seriesPosition"},
         {ScheduledAtRole, "scheduledAt"},
         {PublishedAtRole, "publishedAt"},
     };

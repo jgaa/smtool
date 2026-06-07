@@ -54,15 +54,22 @@ ApplicationWindow {
         "scheduled",
         "published"
     ]
+    property var seriesStatusOptions: [
+        { value: "active", label: "Active" },
+        { value: "paused", label: "Paused" },
+        { value: "completed", label: "Completed" },
+        { value: "archived", label: "Archived" }
+    ]
     property var allContentSortOptions: [
         { label: "Due Date / Alphabetically", mode: 0 },
-        { label: "Alphabetically", mode: 1 },
-        { label: "Status / Alphabetically", mode: 2 },
-        { label: "Status / Due Date", mode: 3 },
-        { label: "Status / First Publish Date", mode: 4 },
-        { label: "Pillar / Alphabetically", mode: 5 },
-        { label: "Pillar / Due Date", mode: 6 },
-        { label: "Pillar / First Publish Date", mode: 7 }
+        { label: "Priority / Alphabetically", mode: 1 },
+        { label: "Alphabetically", mode: 2 },
+        { label: "Status / Alphabetically", mode: 3 },
+        { label: "Status / Due Date", mode: 4 },
+        { label: "Status / First Publish Date", mode: 5 },
+        { label: "Pillar / Alphabetically", mode: 6 },
+        { label: "Pillar / Due Date", mode: 7 },
+        { label: "Pillar / First Publish Date", mode: 8 }
     ]
     property string activeSelectedText: {
         const item = window.activeFocusItem
@@ -322,6 +329,7 @@ ApplicationWindow {
         focus: true
         closePolicy: Popup.NoAutoClose
         property string editingContentId: ""
+        property string presetSeriesId: ""
         property var publicationsModel: []
         property var mediaItems: []
         title: editingContentId.length > 0 ? qsTr("Edit Content") : qsTr("Quick Add")
@@ -336,7 +344,8 @@ ApplicationWindow {
             inboxTitleField.clear()
             inboxDescriptionField.clear()
             inboxTagsField.clear()
-            priorityBox.value = 0
+            presetSeriesId = ""
+            priorityBox.value = appSettings.defaultContentPriority
             scheduledAtSelector.value = ""
             if (statusBox.count > 0) {
                 statusBox.currentIndex = 0
@@ -350,6 +359,7 @@ ApplicationWindow {
             if (channelBox.count > 0) {
                 channelBox.currentIndex = 0
             }
+            seriesBox.currentIndex = -1
         }
 
         function reloadPublications() {
@@ -363,8 +373,23 @@ ApplicationWindow {
             contentMediaEditor.replaceItems(mediaItems)
         }
 
-        function openForCreate() {
+        function openForCreate(seriesId) {
             resetForm()
+            presetSeriesId = seriesId ? seriesId : ""
+            if (presetSeriesId.length > 0) {
+                const presetSeriesIndex = seriesBox.indexOfValue(presetSeriesId)
+                if (presetSeriesIndex >= 0) {
+                    seriesBox.currentIndex = presetSeriesIndex
+                }
+
+                const seriesDetails = appController.currentSeriesDetails
+                if (seriesDetails.pillarId && seriesDetails.pillarId.length > 0) {
+                    const presetPillarIndex = pillarBox.indexOfValue(seriesDetails.pillarId)
+                    if (presetPillarIndex >= 0) {
+                        pillarBox.currentIndex = presetPillarIndex
+                    }
+                }
+            }
             open()
         }
 
@@ -378,6 +403,7 @@ ApplicationWindow {
             inboxTitleField.text = item.title
             inboxDescriptionField.text = item.description
             inboxTagsField.text = item.tags
+            presetSeriesId = item.seriesId ? item.seriesId : ""
             priorityBox.value = item.priority
             scheduledAtSelector.value = item.scheduledAt ? item.scheduledAt.slice(0, 10) : ""
 
@@ -395,6 +421,9 @@ ApplicationWindow {
             if (pillarIndex >= 0) {
                 pillarBox.currentIndex = pillarIndex
             }
+
+            const seriesIndex = seriesBox.indexOfValue(item.seriesId)
+            seriesBox.currentIndex = seriesIndex >= 0 ? seriesIndex : -1
 
             if (item.suggestedChannelId && item.suggestedChannelId.length > 0) {
                 const channelIndex = channelBox.indexOfValue(item.suggestedChannelId)
@@ -464,7 +493,7 @@ ApplicationWindow {
                             }
 
                             GridLayout {
-                                columns: quickAddDialog.editingContentId.length > 0 ? 8 : 6
+                                columns: quickAddDialog.editingContentId.length > 0 ? 10 : 8
                                 columnSpacing: 12
                                 rowSpacing: 12
                                 Layout.fillWidth: true
@@ -491,6 +520,16 @@ ApplicationWindow {
                                     valueRole: "lookupId"
                                 }
 
+                                Label { text: "Series" }
+                                ComboBox {
+                                    id: seriesBox
+                                    Layout.fillWidth: true
+                                    model: appController.contentSeriesModel
+                                    textRole: "displayName"
+                                    valueRole: "lookupId"
+                                    currentIndex: -1
+                                }
+
                                 Label { text: "Ch" }
                                 ComboBox {
                                     id: channelBox
@@ -500,12 +539,49 @@ ApplicationWindow {
                                     valueRole: "lookupId"
                                 }
 
-                                Label { text: "Priority" }
+                                RowLayout {
+                                    spacing: 4
+
+                                    Label { text: "Priority" }
+
+                                    ToolButton {
+                                        icon.name: "help-about"
+                                        text: "Priority help"
+                                        display: AbstractButton.IconOnly
+                                        visible: quickAddDialog.editingContentId.length > 0
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "Higher numbers mean higher priority and greater urgency."
+                                        onClicked: priorityInfoPopup.open()
+                                    }
+                                }
                                 SpinBox {
                                     id: priorityBox
                                     from: 0
                                     to: 100
-                                    value: 0
+                                    value: appSettings.defaultContentPriority
+                                }
+                            }
+
+                            Popup {
+                                id: priorityInfoPopup
+                                parent: Overlay.overlay
+                                anchors.centerIn: Overlay.overlay
+                                width: Math.min(window.width - 80, 420)
+                                modal: true
+                                focus: true
+                                closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+
+                                background: Rectangle {
+                                    radius: 8
+                                    color: "white"
+                                    border.color: "#cfcfcf"
+                                }
+
+                                contentItem: Label {
+                                    width: parent.width
+                                    text: "Higher numbers mean higher priority and more urgent work."
+                                    wrapMode: Text.Wrap
+                                    padding: 16
                                 }
                             }
 
@@ -689,6 +765,7 @@ ApplicationWindow {
                 onAccepted: {
                     const kindId = kindBox.currentIndex >= 0 ? kindBox.currentValue : ""
                     const pillarId = pillarBox.currentIndex >= 0 ? pillarBox.currentValue : ""
+                    const seriesId = seriesBox.currentIndex >= 0 ? seriesBox.currentValue : ""
                     const channelId = channelBox.currentIndex >= 0 ? channelBox.currentValue : ""
                     const status = statusBox.currentIndex >= 0 ? statusBox.currentValue : "inbox"
                     const ok = quickAddDialog.editingContentId.length > 0
@@ -696,6 +773,7 @@ ApplicationWindow {
                                                       inboxTitleField.text,
                                                       inboxDescriptionField.text,
                                                       inboxTagsField.text,
+                                                      seriesId,
                                                       kindId,
                                                       pillarId,
                                                       priorityBox.value,
@@ -709,7 +787,7 @@ ApplicationWindow {
                                                         inboxDescriptionField.text,
                                                         inboxTagsField.text,
                                                         pillarId,
-                                                        "",
+                                                        seriesId,
                                                         priorityBox.value,
                                                         scheduledAtSelector.value,
                                                         channelId,
@@ -1510,15 +1588,45 @@ ApplicationWindow {
         modal: true
         focus: true
         closePolicy: Popup.NoAutoClose
-        title: qsTr("Create Series")
+        property string editingSeriesId: ""
+        title: editingSeriesId.length > 0 ? qsTr("Edit Series") : qsTr("Create Series")
         width: Math.min(window.width - 80, 620)
 
         function resetForm() {
+            editingSeriesId = ""
             seriesNameField.clear()
             seriesDescriptionField.clear()
+            seriesStatusBox.currentIndex = 0
             if (seriesPillarBox.count > 0) {
                 seriesPillarBox.currentIndex = 0
             }
+        }
+
+        function openForCreate() {
+            resetForm()
+            open()
+        }
+
+        function openForEdit() {
+            const series = appController.currentSeriesDetails
+            if (!series.id) {
+                return
+            }
+
+            editingSeriesId = series.id
+            seriesNameField.text = series.name ? series.name : ""
+            seriesDescriptionField.text = series.description ? series.description : ""
+
+            const pillarIndex = seriesPillarBox.indexOfValue(series.pillarId ? series.pillarId : "")
+            if (pillarIndex >= 0) {
+                seriesPillarBox.currentIndex = pillarIndex
+            } else if (seriesPillarBox.count > 0) {
+                seriesPillarBox.currentIndex = 0
+            }
+
+            const statusIndex = seriesStatusBox.indexOfValue(series.status ? series.status : "active")
+            seriesStatusBox.currentIndex = statusIndex >= 0 ? statusIndex : 0
+            open()
         }
 
         ColumnLayout {
@@ -1540,11 +1648,19 @@ ApplicationWindow {
                 }
 
                 Label { text: "Description" }
-                TextArea {
-                    id: seriesDescriptionField
+                ScrollView {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 120
-                    wrapMode: TextEdit.Wrap
+                    clip: true
+                    ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                    ScrollBar.vertical.policy: ScrollBar.AsNeeded
+
+                    TextArea {
+                        id: seriesDescriptionField
+                        width: parent.width
+                        wrapMode: TextEdit.Wrap
+                        selectByMouse: true
+                    }
                 }
 
                 Label { text: "Pillar" }
@@ -1555,6 +1671,15 @@ ApplicationWindow {
                     textRole: "displayName"
                     valueRole: "lookupId"
                 }
+
+                Label { text: "Status" }
+                ComboBox {
+                    id: seriesStatusBox
+                    Layout.fillWidth: true
+                    model: window.seriesStatusOptions
+                    textRole: "label"
+                    valueRole: "value"
+                }
             }
 
             DialogButtonBox {
@@ -1563,7 +1688,12 @@ ApplicationWindow {
 
                 onAccepted: {
                     const pillarId = seriesPillarBox.currentIndex >= 0 ? seriesPillarBox.currentValue : ""
-                    if (appController.createSeries(seriesNameField.text, seriesDescriptionField.text, pillarId)) {
+                    const status = seriesStatusBox.currentIndex >= 0 ? seriesStatusBox.currentValue : "active"
+                    if (appController.saveSeries(createSeriesDialog.editingSeriesId,
+                                                 seriesNameField.text,
+                                                 seriesDescriptionField.text,
+                                                 pillarId,
+                                                 status)) {
                         createSeriesDialog.resetForm()
                         createSeriesDialog.close()
                     }
@@ -1573,6 +1703,75 @@ ApplicationWindow {
                     createSeriesDialog.resetForm()
                     createSeriesDialog.close()
                 }
+            }
+        }
+    }
+
+    Dialog {
+        id: assignSeriesContentDialog
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        modal: true
+        focus: true
+        closePolicy: Popup.NoAutoClose
+        title: qsTr("Add Existing Content")
+        width: Math.min(window.width - 80, 720)
+        property var contentOptions: []
+
+        function reloadOptions() {
+            contentOptions = appController.assignableContentOptionsForCurrentSeries()
+            existingSeriesContentBox.currentIndex = contentOptions.length > 0 ? 0 : -1
+        }
+
+        function openForCurrentSeries() {
+            reloadOptions()
+            open()
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 20
+            spacing: 16
+
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                text: "Assign an existing content item to the selected series."
+            }
+
+            ComboBox {
+                id: existingSeriesContentBox
+                Layout.fillWidth: true
+                model: assignSeriesContentDialog.contentOptions
+                textRole: "title"
+                valueRole: "contentId"
+            }
+
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                color: "#555555"
+                visible: existingSeriesContentBox.currentIndex >= 0
+                text: existingSeriesContentBox.currentIndex >= 0
+                    ? [assignSeriesContentDialog.contentOptions[existingSeriesContentBox.currentIndex].status,
+                       assignSeriesContentDialog.contentOptions[existingSeriesContentBox.currentIndex].series]
+                          .filter(function(value) { return value && value.length > 0 })
+                          .join(" | ")
+                    : ""
+            }
+
+            DialogButtonBox {
+                Layout.fillWidth: true
+                standardButtons: DialogButtonBox.Save | DialogButtonBox.Cancel
+
+                onAccepted: {
+                    const contentId = existingSeriesContentBox.currentIndex >= 0 ? existingSeriesContentBox.currentValue : ""
+                    if (appController.assignContentToCurrentSeries(contentId)) {
+                        assignSeriesContentDialog.close()
+                    }
+                }
+
+                onRejected: assignSeriesContentDialog.close()
             }
         }
     }
@@ -1670,10 +1869,19 @@ ApplicationWindow {
                         }
 
                         delegate: ContentSummaryCard {
+                            required property string itemId
+                            required property string title
+                            required property string description
+                            required property string displayTags
+                            required property string pillar
+                            required property string kind
+                            required property string series
+                            required property string suggestedChannel
+                            required property int priority
                             width: ListView.view.width
                             titleText: title
                             bodyText: description
-                            metaText: [pillar, kind, suggestedChannel].filter(function(value) { return value.length > 0 }).join(" | ")
+                            metaText: [pillar, kind, "Pri " + priority, series, suggestedChannel].filter(function(value) { return value.length > 0 }).join(" | ")
                             onEditRequested: quickAddDialog.openForEdit(itemId)
                             onDeleteRequested: deleteContentDialog.openForContent(itemId, title)
 
@@ -1700,9 +1908,44 @@ ApplicationWindow {
 
                 RowLayout {
                     Layout.fillWidth: true
+                    spacing: 8
 
-                    Item {
+                    DropArea {
+                        id: inboxImportDropArea
                         Layout.fillWidth: true
+                        Layout.preferredHeight: 40
+                        implicitHeight: 40
+
+                        onEntered: drag => {
+                            const localPath = appController.acceptableIdeaImportPath(drag.urls ? drag.urls : [],
+                                                                                     drag.text ? drag.text.toString() : "")
+                            if (localPath.length > 0) {
+                                drag.accept()
+                            }
+                        }
+
+                        onDropped: function(drop) {
+                            const localPath = appController.acceptableIdeaImportPath(drop.urls ? drop.urls : [],
+                                                                                     drop.text ? drop.text.toString() : "")
+                            if (localPath.length > 0) {
+                                appController.importIdeasFromFile(localPath)
+                            }
+                        }
+
+                        Rectangle {
+                            anchors.fill: parent
+                            implicitHeight: 40
+                            radius: 6
+                            color: inboxImportDropArea.containsDrag ? "#eef7ee" : "#fafafa"
+                            border.width: 1
+                            border.color: inboxImportDropArea.containsDrag ? "#2e7d32" : "#d7d7d7"
+
+                            Label {
+                                anchors.centerIn: parent
+                                text: "Drop .md or .txt here"
+                                color: "#666666"
+                            }
+                        }
                     }
 
                     Button {
@@ -2012,6 +2255,7 @@ ApplicationWindow {
 
                             delegate: ContentSummaryCard {
                                 required property string itemId
+                                required property int priority
                                 required property string title
                                 required property string displayTags
                                 required property string kind
@@ -2022,7 +2266,7 @@ ApplicationWindow {
                                 width: ListView.view.width
                                 selected: appController.currentSourceId === itemId
                                 titleText: title
-                                metaText: [kind, status, series, suggestedChannel].filter(function(value) { return value.length > 0 }).join(" | ")
+                                metaText: [kind, "Pri " + priority, status, series, suggestedChannel].filter(function(value) { return value.length > 0 }).join(" | ")
                                 onClicked: appController.currentSourceId = itemId
                                 onEditRequested: quickAddDialog.openForEdit(itemId)
                                 onDeleteRequested: deleteContentDialog.openForContent(itemId, title)
@@ -2073,9 +2317,11 @@ ApplicationWindow {
 
                         delegate: ContentSummaryCard {
                             required property string displayTags
+                            required property int priority
+                            required property string series
                             width: ListView.view.width
                             titleText: title
-                            metaText: [kind, outcome, suggestedChannel, status].filter(function(value) { return value.length > 0 }).join(" | ")
+                            metaText: [kind, "Pri " + priority, series, outcome, suggestedChannel, status].filter(function(value) { return value.length > 0 }).join(" | ")
                             onEditRequested: quickAddDialog.openForEdit(itemId)
                             onDeleteRequested: deleteContentDialog.openForContent(itemId, title)
 
@@ -2109,80 +2355,348 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     title: "Series"
 
-                    ListView {
+                    RowLayout {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: Math.max(520, contentHeight)
-                        clip: true
-                        model: appController.seriesModel
-                        spacing: 8
-                        ScrollBar.vertical: ScrollBar {
-                            policy: ScrollBar.AsNeeded
-                            width: 18
+                        Layout.preferredHeight: 760
+                        spacing: 16
 
-                            contentItem: Rectangle {
-                                implicitWidth: 18
-                                radius: 9
-                                color: parent.pressed ? "#8f8f8f" : "#a7a7a7"
+                        ColumnLayout {
+                            Layout.preferredWidth: 340
+                            Layout.fillHeight: true
+                            spacing: 12
+
+                            RowLayout {
+                                Layout.fillWidth: true
+
+                                Switch {
+                                    text: "Show archived"
+                                    checked: appController.seriesShowArchived
+                                    onToggled: appController.seriesShowArchived = checked
+                                }
                             }
 
-                            background: Rectangle {
-                                radius: 9
-                                color: "#ececec"
+                            TextField {
+                                Layout.fillWidth: true
+                                placeholderText: "Search series name or description"
+                                text: appController.seriesSearchQuery
+                                onTextEdited: appController.seriesSearchQuery = text
+                            }
+
+                            ListView {
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                clip: true
+                                model: appController.seriesModel
+                                spacing: 8
+                                ScrollBar.vertical: ScrollBar {
+                                    policy: ScrollBar.AsNeeded
+                                    width: 18
+
+                                    contentItem: Rectangle {
+                                        implicitWidth: 18
+                                        radius: 9
+                                        color: parent.pressed ? "#8f8f8f" : "#a7a7a7"
+                                    }
+
+                                    background: Rectangle {
+                                        radius: 9
+                                        color: "#ececec"
+                                    }
+                                }
+
+                                delegate: Rectangle {
+                                    required property string seriesId
+                                    required property string name
+                                    required property string description
+                                    required property string pillar
+                                    required property string status
+                                    required property int contentCount
+                                    required property int scheduledCount
+                                    readonly property bool archivedSeries: status === "archived"
+                                    width: ListView.view.width
+                                    radius: 6
+                                    color: appController.currentSeriesId === seriesId ? "#e8f2ff" : "white"
+                                    border.color: archivedSeries ? "#d8b400"
+                                                                  : appController.currentSeriesId === seriesId ? "#4a80d8"
+                                                                                                              : "#d5d5d5"
+                                    border.width: archivedSeries ? 2 : 1
+                                    implicitHeight: layout.implicitHeight + 16
+
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        onClicked: appController.currentSeriesId = seriesId
+                                    }
+
+                                    ColumnLayout {
+                                        id: layout
+                                        anchors.fill: parent
+                                        anchors.margins: 8
+                                        spacing: 4
+
+                                        RowLayout {
+                                            Layout.fillWidth: true
+
+                                            Label {
+                                                Layout.fillWidth: true
+                                                text: name
+                                                font.bold: true
+                                            }
+
+                                            ToolButton {
+                                                icon.name: "document-edit"
+                                                text: "Edit series"
+                                                display: AbstractButton.IconOnly
+                                                ToolTip.visible: hovered
+                                                ToolTip.text: text
+                                                onClicked: {
+                                                    appController.currentSeriesId = seriesId
+                                                    createSeriesDialog.openForEdit()
+                                                }
+                                            }
+
+                                            ToolButton {
+                                                icon.name: "edit-delete"
+                                                text: "Delete series"
+                                                display: AbstractButton.IconOnly
+                                                ToolTip.visible: hovered
+                                                ToolTip.text: text
+                                                onClicked: {
+                                                    appController.currentSeriesId = seriesId
+                                                    appController.deleteCurrentSeries()
+                                                }
+                                            }
+                                        }
+
+                                        Label {
+                                            Layout.fillWidth: true
+                                            wrapMode: Text.Wrap
+                                            text: [pillar, status, contentCount + " items", scheduledCount + " scheduled"]
+                                                .filter(function(value) { return value.length > 0 })
+                                                .join(" | ")
+                                        }
+
+                                        Label {
+                                            text: description
+                                            visible: text.length > 0
+                                            textFormat: Text.MarkdownText
+                                            wrapMode: Text.Wrap
+                                        }
+                                    }
+                                }
+                            }
+
+                            Button {
+                                text: "Create Series"
+                                Layout.alignment: Qt.AlignRight
+                                contentItem: Text {
+                                    text: parent.text
+                                    color: "white"
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                                background: Rectangle {
+                                    radius: 6
+                                    color: "#2e7d32"
+                                }
+                                onClicked: createSeriesDialog.openForCreate()
                             }
                         }
 
-                        delegate: Rectangle {
-                            width: ListView.view.width
-                            radius: 6
-                            color: "white"
-                            border.color: "#d5d5d5"
-                            implicitHeight: layout.implicitHeight + 16
+                        Frame {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
 
                             ColumnLayout {
-                                id: layout
                                 anchors.fill: parent
-                                anchors.margins: 8
-                                spacing: 4
+                                spacing: 12
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+
+                                    Button {
+                                        text: "Quick Add New Idea"
+                                        enabled: appController.currentSeriesId.length > 0
+                                        onClicked: quickAddDialog.openForCreate(appController.currentSeriesId)
+                                    }
+
+                                    Button {
+                                        text: "Add Existing"
+                                        enabled: appController.currentSeriesId.length > 0
+                                        onClicked: assignSeriesContentDialog.openForCurrentSeries()
+                                    }
+
+                                    Item { Layout.fillWidth: true }
+                                }
 
                                 Label {
-                                    text: name
+                                    text: "Series Content"
                                     font.bold: true
                                 }
 
                                 Label {
-                                    text: [pillar, status, contentCount + " items", scheduledCount + " scheduled"].join(" | ")
+                                    visible: appController.currentSeriesId.length === 0
+                                    text: "Select a series to view its content."
+                                    color: "#666666"
                                 }
 
                                 Label {
-                                    text: description
-                                    visible: text.length > 0
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    visible: appController.currentSeriesId.length > 0 && appController.seriesContentModel.rowCount() === 0
+                                    text: "This series has no ideas yet. Start by adding a new idea or assigning an existing one."
+                                    color: "#666666"
                                     wrapMode: Text.Wrap
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+
+                                ListView {
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    clip: true
+                                    model: appController.seriesContentModel
+                                    spacing: 8
+                                    visible: appController.currentSeriesId.length > 0 && appController.seriesContentModel.rowCount() > 0
+
+                                    ScrollBar.vertical: ScrollBar {
+                                        policy: ScrollBar.AsNeeded
+                                        width: 18
+
+                                        contentItem: Rectangle {
+                                            implicitWidth: 18
+                                            radius: 9
+                                            color: parent.pressed ? "#8f8f8f" : "#a7a7a7"
+                                        }
+
+                                        background: Rectangle {
+                                            radius: 9
+                                            color: "#ececec"
+                                        }
+                                    }
+
+                                    delegate: Rectangle {
+                                        required property string itemId
+                                        required property string title
+                                        required property string description
+                                        required property string kind
+                                        required property string pillar
+                                        required property string suggestedChannel
+                                        required property string status
+                                        required property int priority
+                                        required property var seriesPosition
+                                        required property date scheduledAt
+                                        required property date publishedAt
+                                        width: ListView.view.width
+                                        radius: 6
+                                        color: "#ffffff"
+                                        border.color: "#d6d6d6"
+                                        implicitHeight: seriesItemLayout.implicitHeight + 12
+
+                                        RowLayout {
+                                            id: seriesItemLayout
+                                            anchors.fill: parent
+                                            anchors.margins: 6
+                                            spacing: 8
+
+                                            Rectangle {
+                                                Layout.preferredWidth: 36
+                                                Layout.alignment: Qt.AlignTop
+                                                radius: 18
+                                                color: "#edf3ff"
+                                                border.color: "#c9d8f7"
+                                                implicitHeight: 36
+
+                                                Label {
+                                                    anchors.centerIn: parent
+                                                    text: seriesPosition !== undefined ? seriesPosition : "?"
+                                                    font.bold: true
+                                                }
+                                            }
+
+                                            ColumnLayout {
+                                                Layout.fillWidth: true
+
+                                                Label {
+                                                    Layout.fillWidth: true
+                                                    text: title
+                                                    font.bold: true
+                                                    wrapMode: Text.Wrap
+                                                }
+
+                                                Label {
+                                                    Layout.fillWidth: true
+                                                    wrapMode: Text.Wrap
+                                                    text: [pillar, kind, "Pri " + priority, status, suggestedChannel]
+                                                        .filter(function(value) { return value.length > 0 })
+                                                        .join(" | ")
+                                                }
+
+                                                Label {
+                                                    Layout.fillWidth: true
+                                                    visible: description.length > 0
+                                                    text: description
+                                                    textFormat: Text.MarkdownText
+                                                    wrapMode: Text.Wrap
+                                                    maximumLineCount: 3
+                                                    elide: Text.ElideRight
+                                                }
+
+                                                Label {
+                                                    Layout.fillWidth: true
+                                                    visible: text.length > 0
+                                                    color: "#555555"
+                                                    text: [
+                                                        scheduledAt ? "Scheduled " + Qt.formatDateTime(scheduledAt, "yyyy-MM-dd") : "",
+                                                        publishedAt ? "Published " + Qt.formatDateTime(publishedAt, "yyyy-MM-dd") : ""
+                                                    ].filter(function(value) { return value.length > 0 }).join(" | ")
+                                                }
+                                            }
+
+                                            ColumnLayout {
+                                                Layout.alignment: Qt.AlignTop
+                                                spacing: 4
+
+                                                ToolButton {
+                                                    icon.name: "go-up"
+                                                    text: "Move up"
+                                                    display: AbstractButton.IconOnly
+                                                    ToolTip.visible: hovered
+                                                    ToolTip.text: text
+                                                    onClicked: appController.moveSeriesContent(itemId, -1)
+                                                }
+
+                                                ToolButton {
+                                                    icon.name: "go-down"
+                                                    text: "Move down"
+                                                    display: AbstractButton.IconOnly
+                                                    ToolTip.visible: hovered
+                                                    ToolTip.text: text
+                                                    onClicked: appController.moveSeriesContent(itemId, 1)
+                                                }
+
+                                                ToolButton {
+                                                    icon.name: "document-edit"
+                                                    text: "Edit content"
+                                                    display: AbstractButton.IconOnly
+                                                    ToolTip.visible: hovered
+                                                    ToolTip.text: text
+                                                    onClicked: quickAddDialog.openForEdit(itemId)
+                                                }
+
+                                                ToolButton {
+                                                    icon.name: "list-remove"
+                                                    text: "Remove from series"
+                                                    display: AbstractButton.IconOnly
+                                                    ToolTip.visible: hovered
+                                                    ToolTip.text: text
+                                                    onClicked: appController.removeContentFromCurrentSeries(itemId)
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
-                    }
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-
-                    Item {
-                        Layout.fillWidth: true
-                    }
-
-                    Button {
-                        text: "Create Series"
-                        contentItem: Text {
-                            text: parent.text
-                            color: "white"
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                        background: Rectangle {
-                            radius: 6
-                            color: "#2e7d32"
-                        }
-                        onClicked: createSeriesDialog.open()
                     }
                 }
             }
@@ -2251,6 +2765,7 @@ ApplicationWindow {
 
                         delegate: ContentSummaryCard {
                             required property string itemId
+                            required property int priority
                             required property string title
                             required property string description
                             required property string displayTags
@@ -2263,7 +2778,7 @@ ApplicationWindow {
                             width: ListView.view.width
                             titleText: title
                             bodyText: description
-                            metaText: [pillar, kind, status, series, suggestedChannel].filter(function(value) { return value.length > 0 }).join(" | ")
+                            metaText: [pillar, kind, "Pri " + priority, status, series, suggestedChannel].filter(function(value) { return value.length > 0 }).join(" | ")
                             onEditRequested: quickAddDialog.openForEdit(itemId)
                             onDeleteRequested: deleteContentDialog.openForContent(itemId, title)
 

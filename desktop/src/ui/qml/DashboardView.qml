@@ -468,6 +468,7 @@ Item {
                     model: appController.recommendedFocusModel
 
                     delegate: Rectangle {
+                        required property int index
                         required property string displayName
                         required property string detailText
                         required property string healthColor

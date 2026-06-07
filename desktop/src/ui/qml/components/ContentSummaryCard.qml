@@ -67,6 +67,7 @@ Rectangle {
         Label {
             text: root.bodyText
             visible: text.length > 0
+            textFormat: Text.MarkdownText
             wrapMode: Text.Wrap
             Layout.fillWidth: true
         }

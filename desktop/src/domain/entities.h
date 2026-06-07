@@ -44,10 +44,25 @@ struct Series {
     QDateTime updatedAt;
 };
 
+struct SeriesDetail {
+    QString id;
+    QString name;
+    QString description;
+    QString pillarId;
+    QString pillarName;
+    QString status;
+    int contentCount = 0;
+    int scheduledCount = 0;
+    QDateTime createdAt;
+    QDateTime updatedAt;
+};
+
 struct ContentItem {
     QString id;
     QString parentId;
     QString seriesId;
+    int seriesPosition = 0;
+    bool hasSeriesPosition = false;
     QString burstTemplateKey;
     QString title;
     QString description;
@@ -79,6 +94,8 @@ struct ContentSummary {
     QString suggestedChannelName;
     QString status;
     int priority = 0;
+    int seriesPosition = 0;
+    bool hasSeriesPosition = false;
     QDateTime scheduledAt;
     QDateTime publishedAt;
     QDateTime firstPublicationAt;

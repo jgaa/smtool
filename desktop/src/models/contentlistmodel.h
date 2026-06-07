@@ -29,6 +29,7 @@ public:
         SuggestedChannelRole,
         StatusRole,
         PriorityRole,
+        SeriesPositionRole,
         ScheduledAtRole,
         PublishedAtRole,
     };

@@ -14,6 +14,8 @@ ScrollView {
         }
         appSettings.configuredDatabasePath = nextPath
         appSettings.configuredMediaDataDir = mediaDataDirField.text.trim()
+        appSettings.defaultContentPriority = defaultContentPriorityBox.value
+        appSettings.batchMarkdownImports = batchMarkdownImportsSwitch.checked
         appSettings.boardDescriptionPreviewWordCap = previewWordCapBox.value
         appSettings.confirmContentDeletion = confirmDeleteSwitch.checked
         appSettings.fetchAddedUrlTitles = fetchUrlTitlesSwitch.checked
@@ -28,6 +30,8 @@ ScrollView {
         mediaDataDirField.text = appSettings.configuredMediaDataDir.length > 0
             ? appSettings.configuredMediaDataDir
             : appSettings.defaultMediaDataDir
+        defaultContentPriorityBox.value = appSettings.defaultContentPriority
+        batchMarkdownImportsSwitch.checked = appSettings.batchMarkdownImports
         previewWordCapBox.value = appSettings.boardDescriptionPreviewWordCap
         confirmDeleteSwitch.checked = appSettings.confirmContentDeletion
         fetchUrlTitlesSwitch.checked = appSettings.fetchAddedUrlTitles
@@ -97,6 +101,35 @@ ScrollView {
             Layout.fillWidth: true
             text: appSettings.defaultMediaDataDir
             wrapMode: Text.WrapAnywhere
+            color: palette.mid
+        }
+
+        Label {
+            text: qsTr("Default Priority")
+        }
+
+        SpinBox {
+            id: defaultContentPriorityBox
+            from: 0
+            to: 100
+            value: appSettings.defaultContentPriority
+        }
+
+        Label {
+            text: qsTr("Batch Markdown Import")
+        }
+
+        Switch {
+            id: batchMarkdownImportsSwitch
+            checked: appSettings.batchMarkdownImports
+        }
+
+        Item { }
+
+        Label {
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            text: qsTr("When enabled, dropping or importing a Markdown file can create multiple ideas split by markdown sections. Text files always create one idea.")
             color: palette.mid
         }
 

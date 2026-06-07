@@ -123,6 +123,7 @@ Frame {
                     id: cardRoot
                     required property string itemId
                     required property string title
+                    required property string description
                     required property string descriptionPreview
                     required property string displayTags
                     required property string pillar
@@ -183,15 +184,18 @@ Frame {
                         }
 
                         Label {
-                            text: descriptionPreview
+                            text: description
                             visible: text.length > 0
+                            textFormat: Text.MarkdownText
                             wrapMode: Text.Wrap
+                            maximumLineCount: 3
+                            elide: Text.ElideRight
                             color: "#505050"
                             Layout.fillWidth: true
                         }
 
                         Label {
-                            text: [pillar, kind, series].filter(function(value) { return value.length > 0 }).join(" | ")
+                            text: [pillar, kind, "Pri " + priority, series].filter(function(value) { return value.length > 0 }).join(" | ")
                             wrapMode: Text.Wrap
                             color: "#505050"
                             visible: text.length > 0
@@ -207,9 +211,10 @@ Frame {
                         }
 
                         Label {
-                            text: "Priority " + priority + (scheduledAt ? " | " + Qt.formatDate(scheduledAt, "yyyy-MM-dd") : "")
+                            text: scheduledAt ? Qt.formatDate(scheduledAt, "yyyy-MM-dd") : ""
                             color: "#505050"
                             wrapMode: Text.Wrap
+                            visible: text.length > 0
                             Layout.fillWidth: true
                         }
 

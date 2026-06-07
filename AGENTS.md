@@ -2,41 +2,41 @@
 
 This file captures project-specific working rules for humans and coding agents.
 
-Product design, workflow, and schema intent belong in [specs/start-spec.md](/home/jgaa/src/smtool/specs/start-spec.md). Do not duplicate or maintain design details here unless they affect repository workflow.
+Product design, workflow, and schema intent belong in the specs under [specs/](.//specs). Do not duplicate or maintain design details here unless they affect repository workflow.
 
 ## Project Identity
 
 * The current app/repo name is `smtool`.
-* The user previously renamed the app from `MediaStrategy` to `smtool` using search-and-replace.
-* Before continuing implementation, check for leftover old-name references and handle them deliberately. Do not assume the rename is fully complete everywhere.
 
 ## Scope and Delivery Expectations
 
-* This project is a POC intended to become usable quickly.
+* This project is a simple app intended to become usable quickly.
 * Optimize for a usable app early, without letting the codebase become sloppy.
 * The code is open source / GPLv3, so implementation quality matters.
 * Keep the architecture small, explicit, and maintainable. Do not overengineer.
 
 ## Source of Truth
 
-* Functional requirements and UX behavior live in [specs/start-spec.md](/home/jgaa/src/smtool/specs/start-spec.md).
+* [specs/start-spec.md](.//specs/start-spec.md) is the original product spec, but it is partially obsolete.
+* For newer or expanded features, treat the relevant feature spec under [specs/](.//specs) as the source of truth for that area.
+* When specs conflict, prefer the newer, more specific feature spec over older general guidance in `start-spec.md`.
 * If implementation questions are not resolved by the spec or existing code, stop and ask the user instead of guessing.
 * Do not invent user preferences beyond what is explicitly stated in chat or docs.
 
 ## Build and Layout
 
-* The top-level desktop build entry point must stay in [desktop/CMakeLists.txt](/home/jgaa/src/smtool/desktop/CMakeLists.txt).
-* The desktop app source lives under [desktop/src](/home/jgaa/src/smtool/desktop/src).
-* SQLite migrations live under [desktop/resources/migrations](/home/jgaa/src/smtool/desktop/resources/migrations).
-* Tests live under [desktop/tests](/home/jgaa/src/smtool/desktop/tests).
+* The top-level desktop build entry point must stay in [desktop/CMakeLists.txt](.//desktop/CMakeLists.txt).
+* The desktop app source lives under [desktop/src](.//desktop/src).
+* SQLite migrations live under [desktop/resources/migrations](.//desktop/resources/migrations).
+* Tests live under [desktop/tests](.//desktop/tests).
 
 ## Current Implementation Shape
 
 * The app currently uses Qt 6, C++20, QML, QtSql, and CMake.
 * Data access is synchronous and goes through repository classes.
 * QML-facing collections are exposed via `QAbstractListModel` subclasses.
-* The main coordinator is [desktop/src/app/appcontroller.h](/home/jgaa/src/smtool/desktop/src/app/appcontroller.h).
-* The initial schema is in [desktop/resources/migrations/001_initial.sql](/home/jgaa/src/smtool/desktop/resources/migrations/001_initial.sql).
+* The main coordinator is [desktop/src/app/appcontroller.h](.//desktop/src/app/appcontroller.h).
+* The initial schema is in [desktop/resources/migrations/001_initial.sql](.//desktop/resources/migrations/001_initial.sql).
 
 ## Coding Rules
 
@@ -77,4 +77,4 @@ Product design, workflow, and schema intent belong in [specs/start-spec.md](/hom
 
 ## Known Practical Notes
 
-* A Qt Creator user file exists at [desktop/.qtcreator/CMakeLists.txt.user](/home/jgaa/src/smtool/desktop/.qtcreator/CMakeLists.txt.user). Treat it as local/editor state unless the user explicitly asks otherwise.
+* A Qt Creator user file exists at [desktop/.qtcreator/CMakeLists.txt.user](.//desktop/.qtcreator/CMakeLists.txt.user). Treat it as local/editor state.

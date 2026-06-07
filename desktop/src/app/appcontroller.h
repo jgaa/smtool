@@ -36,10 +36,12 @@ class AppController : public QObject
     Q_PROPERTY(SmTool::Models::ContentListModel *sourceModel READ sourceModel CONSTANT)
     Q_PROPERTY(SmTool::Models::ContentListModel *derivativeModel READ derivativeModel CONSTANT)
     Q_PROPERTY(SmTool::Models::SeriesListModel *seriesModel READ seriesModel CONSTANT)
+    Q_PROPERTY(SmTool::Models::ContentListModel *seriesContentModel READ seriesContentModel CONSTANT)
     Q_PROPERTY(SmTool::Models::LookupListModel *pillarModel READ pillarModel CONSTANT)
     Q_PROPERTY(SmTool::Models::LookupListModel *tagModel READ tagModel CONSTANT)
     Q_PROPERTY(SmTool::Models::LookupListModel *kindModel READ kindModel CONSTANT)
     Q_PROPERTY(SmTool::Models::LookupListModel *channelModel READ channelModel CONSTANT)
+    Q_PROPERTY(SmTool::Models::LookupListModel *contentSeriesModel READ contentSeriesModel CONSTANT)
     Q_PROPERTY(SmTool::Models::LookupListModel *goalSeriesModel READ goalSeriesModel CONSTANT)
     Q_PROPERTY(SmTool::Models::GoalsListModel *goalsModel READ goalsModel CONSTANT)
     Q_PROPERTY(SmTool::Models::DashboardRowModel *goalAchievementModel READ goalAchievementModel CONSTANT)
@@ -51,8 +53,12 @@ class AppController : public QObject
     Q_PROPERTY(bool allContentShowArchived READ allContentShowArchived WRITE setAllContentShowArchived NOTIFY allContentShowArchivedChanged)
     Q_PROPERTY(bool calendarIncludeArchived READ calendarIncludeArchived WRITE setCalendarIncludeArchived NOTIFY calendarIncludeArchivedChanged)
     Q_PROPERTY(bool calendarIncludePublished READ calendarIncludePublished WRITE setCalendarIncludePublished NOTIFY calendarIncludePublishedChanged)
+    Q_PROPERTY(bool seriesShowArchived READ seriesShowArchived WRITE setSeriesShowArchived NOTIFY seriesShowArchivedChanged)
     Q_PROPERTY(bool clipboardHasText READ clipboardHasText NOTIFY clipboardHasTextChanged)
     Q_PROPERTY(QString currentSourceId READ currentSourceId WRITE setCurrentSourceId NOTIFY currentSourceIdChanged)
+    Q_PROPERTY(QString currentSeriesId READ currentSeriesId WRITE setCurrentSeriesId NOTIFY currentSeriesChanged)
+    Q_PROPERTY(QVariantMap currentSeriesDetails READ currentSeriesDetails NOTIFY currentSeriesChanged)
+    Q_PROPERTY(QString seriesSearchQuery READ seriesSearchQuery WRITE setSeriesSearchQuery NOTIFY seriesSearchQueryChanged)
     Q_PROPERTY(QString searchQuery READ searchQuery WRITE setSearchQuery NOTIFY searchQueryChanged)
     Q_PROPERTY(QString dashboardPerformancePeriodKey READ dashboardPerformancePeriodKey NOTIFY dashboardPeriodsChanged)
     Q_PROPERTY(QString dashboardPerformanceStartDate READ dashboardPerformanceStartDate NOTIFY dashboardPeriodsChanged)
@@ -68,6 +74,8 @@ public:
     explicit AppController(Data::Database::Options databaseOptions = {}, QObject *parent = nullptr);
 
     bool initialize(QString *errorMessage = nullptr);
+    void setDefaultContentPriority(int value);
+    void setBatchMarkdownImportsEnabled(bool enabled);
     void setDescriptionPreviewWordCap(int value);
 
     [[nodiscard]] Models::ContentListModel *inboxModel();
@@ -77,10 +85,12 @@ public:
     [[nodiscard]] Models::ContentListModel *sourceModel();
     [[nodiscard]] Models::ContentListModel *derivativeModel();
     [[nodiscard]] Models::SeriesListModel *seriesModel();
+    [[nodiscard]] Models::ContentListModel *seriesContentModel();
     [[nodiscard]] Models::LookupListModel *pillarModel();
     [[nodiscard]] Models::LookupListModel *tagModel();
     [[nodiscard]] Models::LookupListModel *kindModel();
     [[nodiscard]] Models::LookupListModel *channelModel();
+    [[nodiscard]] Models::LookupListModel *contentSeriesModel();
     [[nodiscard]] Models::LookupListModel *goalSeriesModel();
     [[nodiscard]] Models::GoalsListModel *goalsModel();
     [[nodiscard]] Models::DashboardRowModel *goalAchievementModel();
@@ -100,11 +110,18 @@ public:
 
     [[nodiscard]] bool calendarIncludePublished() const;
     void setCalendarIncludePublished(bool enabled);
+    [[nodiscard]] bool seriesShowArchived() const;
+    void setSeriesShowArchived(bool enabled);
 
     [[nodiscard]] bool clipboardHasText() const;
 
     [[nodiscard]] QString currentSourceId() const;
     void setCurrentSourceId(const QString &id);
+    [[nodiscard]] QString currentSeriesId() const;
+    void setCurrentSeriesId(const QString &id);
+    [[nodiscard]] QVariantMap currentSeriesDetails() const;
+    [[nodiscard]] QString seriesSearchQuery() const;
+    void setSeriesSearchQuery(const QString &value);
 
     [[nodiscard]] QString searchQuery() const;
     void setSearchQuery(const QString &value);
@@ -135,6 +152,8 @@ public:
     Q_INVOKABLE bool createIdeaFromText(const QString &text);
     Q_INVOKABLE bool importIdeasFromUserSelectedFile();
     Q_INVOKABLE bool importIdeasFromFile(const QString &filePath);
+    Q_INVOKABLE bool supportsIdeaImportFile(const QString &filePath) const;
+    Q_INVOKABLE QString acceptableIdeaImportPath(const QVariantList &urls, const QString &text) const;
     Q_INVOKABLE QString chooseMediaFile() const;
     Q_INVOKABLE QString localPathFromUrl(const QString &urlText) const;
     Q_INVOKABLE bool openMedia(const QVariantMap &mediaItem, const QString &mediaDataDir) const;
@@ -152,6 +171,7 @@ public:
                                    const QString &title,
                                    const QString &description,
                                    const QString &tags,
+                                   const QString &seriesId,
                                    const QString &kindId,
                                    const QString &pillarId,
                                    int priority,
@@ -186,6 +206,17 @@ public:
                                      bool fetchUrlTitles = false);
     Q_INVOKABLE bool moveContentToStatus(const QString &contentId, const QString &targetStatus);
     Q_INVOKABLE bool createSeries(const QString &name, const QString &description, const QString &pillarId);
+    Q_INVOKABLE bool saveSeries(const QString &seriesId,
+                                const QString &name,
+                                const QString &description,
+                                const QString &pillarId,
+                                const QString &status);
+    Q_INVOKABLE bool archiveCurrentSeries();
+    Q_INVOKABLE bool deleteCurrentSeries();
+    Q_INVOKABLE bool moveSeriesContent(const QString &contentId, int direction);
+    Q_INVOKABLE bool removeContentFromCurrentSeries(const QString &contentId);
+    Q_INVOKABLE bool assignContentToCurrentSeries(const QString &contentId);
+    Q_INVOKABLE QVariantList assignableContentOptionsForCurrentSeries() const;
     Q_INVOKABLE QVariantList burstTemplateOptions() const;
     Q_INVOKABLE bool createBurstForCurrentSource(const QVariantList &templateKeys);
 
@@ -194,8 +225,11 @@ signals:
     void allContentShowArchivedChanged();
     void calendarIncludeArchivedChanged();
     void calendarIncludePublishedChanged();
+    void seriesShowArchivedChanged();
     void clipboardHasTextChanged();
     void currentSourceIdChanged();
+    void currentSeriesChanged();
+    void seriesSearchQueryChanged();
     void searchQueryChanged();
     void dashboardPeriodsChanged();
     void statusMessageChanged();
@@ -212,6 +246,7 @@ private:
     void refreshSources();
     void refreshDerivatives();
     void refreshSeries();
+    void refreshSeriesContent();
     void refreshGoals();
     void refreshDashboard();
     void refreshClipboardHasText();
@@ -249,10 +284,12 @@ private:
     Models::ContentListModel sourceModel_;
     Models::ContentListModel derivativeModel_;
     Models::SeriesListModel seriesModel_;
+    Models::ContentListModel seriesContentModel_;
     Models::LookupListModel pillarModel_;
     Models::LookupListModel tagModel_;
     Models::LookupListModel kindModel_;
     Models::LookupListModel channelModel_;
+    Models::LookupListModel contentSeriesModel_;
     Models::LookupListModel goalSeriesModel_;
     Models::GoalsListModel goalsModel_;
     Models::DashboardRowModel goalAchievementModel_;
@@ -265,10 +302,15 @@ private:
     bool allContentShowArchived_ = false;
     bool calendarIncludeArchived_ = false;
     bool calendarIncludePublished_ = false;
+    bool seriesShowArchived_ = false;
     bool clipboardHasText_ = false;
     QString currentSourceId_;
+    QString currentSeriesId_;
+    QString seriesSearchQuery_;
     QString searchQuery_;
     QString statusMessage_;
+    int defaultContentPriority_ = 5;
+    bool batchMarkdownImportsEnabled_ = true;
     int descriptionPreviewWordCap_ = 20;
     Data::ContentRepository::SortMode allContentSortMode_ = Data::ContentRepository::SortMode::DueDateAlphabetical;
     std::map<QString, std::unique_ptr<Models::ContentListModel>> boardModels_;

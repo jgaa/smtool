@@ -65,6 +65,38 @@ QString AppSettings::effectiveMediaDataDir() const
     return configured.isEmpty() ? defaultMediaDataDir() : configured;
 }
 
+int AppSettings::defaultContentPriority() const
+{
+    return normalizedDefaultContentPriority(
+        QSettings{}.value(QStringLiteral("ui/defaultContentPriority"), 5).toInt());
+}
+
+void AppSettings::setDefaultContentPriority(int value)
+{
+    const auto normalized = normalizedDefaultContentPriority(value);
+    if (defaultContentPriority() == normalized) {
+        return;
+    }
+
+    saveValue(QStringLiteral("ui/defaultContentPriority"), normalized);
+    emit defaultContentPriorityChanged();
+}
+
+bool AppSettings::batchMarkdownImports() const
+{
+    return QSettings{}.value(QStringLiteral("ui/batchMarkdownImports"), true).toBool();
+}
+
+void AppSettings::setBatchMarkdownImports(bool enabled)
+{
+    if (batchMarkdownImports() == enabled) {
+        return;
+    }
+
+    saveValue(QStringLiteral("ui/batchMarkdownImports"), enabled);
+    emit batchMarkdownImportsChanged();
+}
+
 int AppSettings::boardDescriptionPreviewWordCap() const
 {
     return normalizedBoardDescriptionPreviewWordCap(
@@ -194,6 +226,12 @@ void AppSettings::ensureDefaults() const
     if (!settings.contains(QStringLiteral("system/mediaDataDir"))) {
         settings.setValue(QStringLiteral("system/mediaDataDir"), QString{});
     }
+    if (!settings.contains(QStringLiteral("ui/defaultContentPriority"))) {
+        settings.setValue(QStringLiteral("ui/defaultContentPriority"), 5);
+    }
+    if (!settings.contains(QStringLiteral("ui/batchMarkdownImports"))) {
+        settings.setValue(QStringLiteral("ui/batchMarkdownImports"), true);
+    }
     if (!settings.contains(QStringLiteral("ui/boardDescriptionPreviewWordCap"))) {
         settings.setValue(QStringLiteral("ui/boardDescriptionPreviewWordCap"), 10);
     }
@@ -221,6 +259,11 @@ QString AppSettings::normalizedPath(const QString &path) const
     }
 
     return QDir::cleanPath(trimmed);
+}
+
+int AppSettings::normalizedDefaultContentPriority(int value) const
+{
+    return std::clamp(value, 0, 100);
 }
 
 int AppSettings::normalizedBoardDescriptionPreviewWordCap(int value) const

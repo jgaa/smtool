@@ -118,7 +118,17 @@ QString ideaTitleFromText(const QString &text)
 bool isMarkdownFilePath(const QString &filePath)
 {
     const auto suffix = QFileInfo{filePath}.suffix().toLower();
-    return suffix == "md"_L1 || suffix == "markdown"_L1;
+    return suffix == "md"_L1;
+}
+
+bool isPlainTextFilePath(const QString &filePath)
+{
+    return QFileInfo{filePath}.suffix().toLower() == "txt"_L1;
+}
+
+bool isSupportedIdeaImportFilePath(const QString &filePath)
+{
+    return isMarkdownFilePath(filePath) || isPlainTextFilePath(filePath);
 }
 
 bool isRemoteUrl(const QString &value)
@@ -266,6 +276,17 @@ void AppController::setDescriptionPreviewWordCap(int value)
     allContentModel_.setDescriptionPreviewWordCap(value);
     sourceModel_.setDescriptionPreviewWordCap(value);
     derivativeModel_.setDescriptionPreviewWordCap(value);
+    seriesContentModel_.setDescriptionPreviewWordCap(value);
+}
+
+void AppController::setDefaultContentPriority(int value)
+{
+    defaultContentPriority_ = std::clamp(value, 0, 100);
+}
+
+void AppController::setBatchMarkdownImportsEnabled(bool enabled)
+{
+    batchMarkdownImportsEnabled_ = enabled;
 }
 
 Models::ContentListModel *AppController::inboxModel() { return &inboxModel_; }
@@ -275,10 +296,12 @@ Models::ContentListModel *AppController::allContentModel() { return &allContentM
 Models::ContentListModel *AppController::sourceModel() { return &sourceModel_; }
 Models::ContentListModel *AppController::derivativeModel() { return &derivativeModel_; }
 Models::SeriesListModel *AppController::seriesModel() { return &seriesModel_; }
+Models::ContentListModel *AppController::seriesContentModel() { return &seriesContentModel_; }
 Models::LookupListModel *AppController::pillarModel() { return &pillarModel_; }
 Models::LookupListModel *AppController::tagModel() { return &tagModel_; }
 Models::LookupListModel *AppController::kindModel() { return &kindModel_; }
 Models::LookupListModel *AppController::channelModel() { return &channelModel_; }
+Models::LookupListModel *AppController::contentSeriesModel() { return &contentSeriesModel_; }
 Models::LookupListModel *AppController::goalSeriesModel() { return &goalSeriesModel_; }
 Models::GoalsListModel *AppController::goalsModel() { return &goalsModel_; }
 Models::DashboardRowModel *AppController::goalAchievementModel() { return &goalAchievementModel_; }
@@ -335,6 +358,18 @@ void AppController::setCalendarIncludePublished(bool enabled)
     emit calendarIncludePublishedChanged();
 }
 
+bool AppController::seriesShowArchived() const { return seriesShowArchived_; }
+
+void AppController::setSeriesShowArchived(bool enabled)
+{
+    if (seriesShowArchived_ == enabled) {
+        return;
+    }
+    seriesShowArchived_ = enabled;
+    refreshSeries();
+    emit seriesShowArchivedChanged();
+}
+
 bool AppController::clipboardHasText() const { return clipboardHasText_; }
 
 QString AppController::currentSourceId() const { return currentSourceId_; }
@@ -347,6 +382,55 @@ void AppController::setCurrentSourceId(const QString &id)
     currentSourceId_ = id;
     refreshDerivatives();
     emit currentSourceIdChanged();
+}
+
+QString AppController::currentSeriesId() const { return currentSeriesId_; }
+
+void AppController::setCurrentSeriesId(const QString &id)
+{
+    if (currentSeriesId_ == id) {
+        return;
+    }
+    currentSeriesId_ = id;
+    refreshSeriesContent();
+    emit currentSeriesChanged();
+}
+
+QVariantMap AppController::currentSeriesDetails() const
+{
+    if (!seriesRepository_ || currentSeriesId_.isEmpty()) {
+        return {};
+    }
+
+    const auto series = seriesRepository_->getById(currentSeriesId_);
+    if (series.id.isEmpty()) {
+        return {};
+    }
+
+    return {
+        {QStringLiteral("id"), series.id},
+        {QStringLiteral("name"), series.name},
+        {QStringLiteral("description"), series.description},
+        {QStringLiteral("pillarId"), series.pillarId},
+        {QStringLiteral("pillarName"), series.pillarName},
+        {QStringLiteral("status"), series.status},
+        {QStringLiteral("contentCount"), series.contentCount},
+        {QStringLiteral("scheduledCount"), series.scheduledCount},
+        {QStringLiteral("createdAt"), series.createdAt.isValid() ? series.createdAt.toString(Qt::ISODate) : QString{}},
+        {QStringLiteral("updatedAt"), series.updatedAt.isValid() ? series.updatedAt.toString(Qt::ISODate) : QString{}},
+    };
+}
+
+QString AppController::seriesSearchQuery() const { return seriesSearchQuery_; }
+
+void AppController::setSeriesSearchQuery(const QString &value)
+{
+    if (seriesSearchQuery_ == value) {
+        return;
+    }
+    seriesSearchQuery_ = value;
+    refreshSeries();
+    emit seriesSearchQueryChanged();
 }
 
 QString AppController::searchQuery() const { return searchQuery_; }
@@ -418,6 +502,7 @@ bool AppController::refreshAll()
     refreshSources();
     refreshDerivatives();
     refreshSeries();
+    refreshSeriesContent();
     refreshGoals();
     refreshDashboard();
     return true;
@@ -508,7 +593,7 @@ bool AppController::importIdeasFromUserSelectedFile()
     const auto selectedPath = QFileDialog::getOpenFileName(nullptr,
                                                            QStringLiteral("Import Ideas"),
                                                            QString{},
-                                                           QStringLiteral("Text and Markdown files (*.txt *.md *.markdown);;All files (*)"));
+                                                           QStringLiteral("Text and Markdown files (*.txt *.md);;All files (*)"));
     if (selectedPath.isEmpty()) {
         return false;
     }
@@ -525,6 +610,13 @@ bool AppController::importIdeasFromFile(const QString &filePath)
         return false;
     }
 
+    if (!isSupportedIdeaImportFilePath(trimmedPath)) {
+        setStatusMessage(QStringLiteral("Only .md and .txt files can be imported."));
+        LOG_ERROR << "File import failed for '" << trimmedPath.toStdString()
+                  << "': unsupported file extension";
+        return false;
+    }
+
     QFile file{trimmedPath};
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
         setStatusMessage(QStringLiteral("Could not open import file."));
@@ -534,8 +626,9 @@ bool AppController::importIdeasFromFile(const QString &filePath)
     }
 
     const auto content = QString::fromUtf8(file.readAll());
-    const auto ideas = isMarkdownFilePath(trimmedPath) ? splitIdeasFromMarkdown(content)
-                                                       : QStringList{content.trimmed()};
+    const auto ideas = isMarkdownFilePath(trimmedPath) && batchMarkdownImportsEnabled_
+        ? splitIdeasFromMarkdown(content)
+        : QStringList{content.trimmed()};
 
     int importedCount = 0;
     for (const auto &idea : ideas) {
@@ -562,6 +655,49 @@ bool AppController::importIdeasFromFile(const QString &filePath)
     LOG_INFO << importedCount << (importedCount == 1 ? " idea was imported from: " : " ideas were imported from: ")
              << trimmedPath.toStdString();
     return true;
+}
+
+bool AppController::supportsIdeaImportFile(const QString &filePath) const
+{
+    return isSupportedIdeaImportFilePath(filePath.trimmed());
+}
+
+QString AppController::acceptableIdeaImportPath(const QVariantList &urls, const QString &text) const
+{
+    LOG_DEBUG << "Evaluating idea import drop: urls=" << urls.size()
+              << " textLength=" << text.size();
+
+    for (const auto &value : urls) {
+        const auto urlText = value.toString().trimmed();
+        const auto localPath = localFilePathFromUrl(urlText);
+        LOG_DEBUG << "Drop URL '" << urlText.toStdString()
+                  << "' localPath='" << localPath.toStdString() << "'";
+        if (localPath.isEmpty()) {
+            continue;
+        }
+        if (isSupportedIdeaImportFilePath(localPath)) {
+            LOG_INFO << "Accepting dropped idea import file '" << localPath.toStdString() << "'";
+            return localPath;
+        }
+        LOG_DEBUG << "Rejected dropped local file due to unsupported extension: '"
+                  << localPath.toStdString() << "'";
+    }
+
+    const auto trimmedText = text.trimmed();
+    if (!trimmedText.isEmpty()) {
+        const auto firstLine = trimmedText.section(QRegularExpression(QStringLiteral("\\r?\\n")), 0, 0).trimmed();
+        const auto localPath = localFilePathFromUrl(firstLine);
+        LOG_DEBUG << "Drop text firstLine='" << firstLine.toStdString()
+                  << "' localPath='" << localPath.toStdString() << "'";
+        if (!localPath.isEmpty() && isSupportedIdeaImportFilePath(localPath)) {
+            LOG_INFO << "Accepting dropped idea import file from text payload '"
+                     << localPath.toStdString() << "'";
+            return localPath;
+        }
+    }
+
+    LOG_DEBUG << "Drop rejected for idea import: no acceptable .md or .txt local file found";
+    return {};
 }
 
 QString AppController::chooseMediaFile() const
@@ -643,7 +779,7 @@ bool AppController::createIdeaFromTextInternal(const QString &text, QString *err
     }
 
     LOG_INFO << "Creating inbox idea from text with title '" << title.toStdString() << "'";
-    return createInboxItem(title, trimmed, {}, pillars.front().id, {}, 0, {}, {});
+    return createInboxItem(title, trimmed, {}, pillars.front().id, {}, defaultContentPriority_, {}, {});
 }
 QVariantMap AppController::contentDetails(const QString &contentId) const
 {
@@ -661,6 +797,8 @@ QVariantMap AppController::contentDetails(const QString &contentId) const
         {QStringLiteral("title"), item.title},
         {QStringLiteral("description"), item.description},
         {QStringLiteral("tags"), item.tags},
+        {QStringLiteral("seriesId"), item.seriesId},
+        {QStringLiteral("seriesPosition"), item.hasSeriesPosition ? QVariant{item.seriesPosition} : QVariant{}},
         {QStringLiteral("kindId"), item.kindId},
         {QStringLiteral("pillarId"), item.pillarId},
         {QStringLiteral("priority"), item.priority},
@@ -950,6 +1088,7 @@ bool AppController::updateContent(const QString &contentId,
                                   const QString &title,
                                   const QString &description,
                                   const QString &tags,
+                                  const QString &seriesId,
                                   const QString &kindId,
                                   const QString &pillarId,
                                   int priority,
@@ -995,6 +1134,7 @@ bool AppController::updateContent(const QString &contentId,
     updated.title = title.trimmed();
     updated.description = description.trimmed();
     updated.tags = tags;
+    updated.seriesId = seriesId.trimmed();
     updated.kindId = kindId.trimmed().isEmpty() ? existing.kindId : kindId;
     updated.pillarId = pillarId;
     updated.priority = priority;
@@ -1235,7 +1375,9 @@ bool AppController::createInboxItem(const QString &title,
         return false;
     }
 
-    const auto contentId = contentRepository_->create(content, &errorMessage);
+    const auto contentId = seriesId.trimmed().isEmpty()
+        ? contentRepository_->create(content, &errorMessage)
+        : contentRepository_->createInSeries(seriesId.trimmed(), content, &errorMessage);
     if (contentId.isEmpty()) {
         rollbackSavepoint(db, QStringLiteral("app_content_create"));
         setStatusMessage(errorMessage);
@@ -1284,14 +1426,185 @@ bool AppController::createSeries(const QString &name, const QString &description
     }
 
     QString errorMessage;
-    if (seriesRepository_->create(name.trimmed(), description.trimmed(), pillarId, QStringLiteral("active"), &errorMessage).isEmpty()) {
+    const auto seriesId = seriesRepository_->create(name.trimmed(), description.trimmed(), pillarId, QStringLiteral("active"), &errorMessage);
+    if (seriesId.isEmpty()) {
         setStatusMessage(errorMessage);
         return false;
     }
 
     refreshAll();
+    setCurrentSeriesId(seriesId);
     setStatusMessage(QStringLiteral("Series created."));
     return true;
+}
+
+bool AppController::saveSeries(const QString &seriesId,
+                               const QString &name,
+                               const QString &description,
+                               const QString &pillarId,
+                               const QString &status)
+{
+    if (name.trimmed().isEmpty()) {
+        setStatusMessage(QStringLiteral("Series name is required."));
+        return false;
+    }
+
+    QString errorMessage;
+    if (seriesId.trimmed().isEmpty()) {
+        const auto createdId = seriesRepository_->create(name.trimmed(), description.trimmed(), pillarId.trimmed(), status.trimmed(), &errorMessage);
+        if (createdId.isEmpty()) {
+            setStatusMessage(errorMessage);
+            return false;
+        }
+        refreshAll();
+        setCurrentSeriesId(createdId);
+        setStatusMessage(QStringLiteral("Series created."));
+        return true;
+    }
+
+    const auto existing = seriesRepository_->getById(seriesId.trimmed());
+    if (existing.id.isEmpty()) {
+        setStatusMessage(QStringLiteral("Series not found."));
+        return false;
+    }
+
+    Domain::SeriesDetail updated = existing;
+    updated.name = name.trimmed();
+    updated.description = description.trimmed();
+    updated.pillarId = pillarId.trimmed();
+    updated.status = status.trimmed();
+    if (!seriesRepository_->update(updated, &errorMessage)) {
+        setStatusMessage(errorMessage);
+        return false;
+    }
+
+    refreshAll();
+    setStatusMessage(QStringLiteral("Series updated."));
+    return true;
+}
+
+bool AppController::archiveCurrentSeries()
+{
+    if (currentSeriesId_.trimmed().isEmpty()) {
+        setStatusMessage(QStringLiteral("Select a series first."));
+        return false;
+    }
+
+    QString errorMessage;
+    if (!seriesRepository_->archive(currentSeriesId_, &errorMessage)) {
+        setStatusMessage(errorMessage);
+        return false;
+    }
+
+    refreshAll();
+    setStatusMessage(QStringLiteral("Series archived."));
+    return true;
+}
+
+bool AppController::deleteCurrentSeries()
+{
+    if (currentSeriesId_.trimmed().isEmpty()) {
+        setStatusMessage(QStringLiteral("Select a series first."));
+        return false;
+    }
+
+    QString errorMessage;
+    if (!seriesRepository_->remove(currentSeriesId_, &errorMessage)) {
+        setStatusMessage(errorMessage);
+        return false;
+    }
+
+    const auto deletedId = currentSeriesId_;
+    refreshAll();
+    if (currentSeriesId_ == deletedId) {
+        setCurrentSeriesId(QString{});
+    }
+    setStatusMessage(QStringLiteral("Series deleted."));
+    return true;
+}
+
+bool AppController::moveSeriesContent(const QString &contentId, int direction)
+{
+    if (currentSeriesId_.trimmed().isEmpty()) {
+        setStatusMessage(QStringLiteral("Select a series first."));
+        return false;
+    }
+
+    QString errorMessage;
+    if (!contentRepository_->moveSeriesItem(currentSeriesId_, contentId.trimmed(), direction, &errorMessage)) {
+        setStatusMessage(errorMessage);
+        return false;
+    }
+
+    refreshSeries();
+    refreshSeriesContent();
+    setStatusMessage(direction < 0 ? QStringLiteral("Series item moved up.") : QStringLiteral("Series item moved down."));
+    return true;
+}
+
+bool AppController::removeContentFromCurrentSeries(const QString &contentId)
+{
+    if (contentId.trimmed().isEmpty()) {
+        setStatusMessage(QStringLiteral("Content id is required."));
+        return false;
+    }
+
+    QString errorMessage;
+    if (!contentRepository_->removeContentFromSeries(contentId.trimmed(), &errorMessage)) {
+        setStatusMessage(errorMessage);
+        return false;
+    }
+
+    refreshAll();
+    setStatusMessage(QStringLiteral("Content removed from series."));
+    return true;
+}
+
+bool AppController::assignContentToCurrentSeries(const QString &contentId)
+{
+    if (currentSeriesId_.trimmed().isEmpty()) {
+        setStatusMessage(QStringLiteral("Select a series first."));
+        return false;
+    }
+    if (contentId.trimmed().isEmpty()) {
+        setStatusMessage(QStringLiteral("Choose content to assign."));
+        return false;
+    }
+
+    QString errorMessage;
+    if (!contentRepository_->assignContentToSeries(contentId.trimmed(), currentSeriesId_, &errorMessage)) {
+        setStatusMessage(errorMessage);
+        return false;
+    }
+
+    refreshAll();
+    setStatusMessage(QStringLiteral("Content assigned to series."));
+    return true;
+}
+
+QVariantList AppController::assignableContentOptionsForCurrentSeries() const
+{
+    QVariantList options;
+    if (!contentRepository_ || currentSeriesId_.isEmpty()) {
+        return options;
+    }
+
+    for (const auto &item : contentRepository_->allItems(true, Data::ContentRepository::SortMode::Alphabetical)) {
+        if (item.id.isEmpty()) {
+            continue;
+        }
+        const auto content = contentRepository_->getById(item.id);
+        if (content.seriesId == currentSeriesId_) {
+            continue;
+        }
+        options.push_back(QVariantMap{
+            {QStringLiteral("contentId"), item.id},
+            {QStringLiteral("title"), item.title},
+            {QStringLiteral("status"), item.status},
+            {QStringLiteral("series"), item.seriesName},
+        });
+    }
+    return options;
 }
 
 QVariantList AppController::burstTemplateOptions() const
@@ -1546,6 +1859,7 @@ void AppController::loadLookupModels()
     tagModel_.setItems(lookupsRepository_->tags());
     kindModel_.setItems(lookupsRepository_->activeLookups(QStringLiteral("content_kind")));
     channelModel_.setItems(lookupsRepository_->activeLookups(QStringLiteral("channel")));
+    contentSeriesModel_.setItems(lookupsRepository_->series(false));
     goalSeriesModel_.setItems(lookupsRepository_->series());
     syncContentStatusModels();
 }
@@ -1620,7 +1934,29 @@ void AppController::refreshDerivatives()
 
 void AppController::refreshSeries()
 {
-    seriesModel_.setItems(seriesRepository_->list(boardShowArchived_, searchQuery_));
+    seriesModel_.setItems(seriesRepository_->list(seriesShowArchived_, seriesSearchQuery_));
+    if (currentSeriesId_.isEmpty() && seriesModel_.rowCount() > 0) {
+        currentSeriesId_ = seriesModel_.data(seriesModel_.index(0, 0), Models::SeriesListModel::IdRole).toString();
+        emit currentSeriesChanged();
+    } else if (!currentSeriesId_.isEmpty()) {
+        bool stillExists = false;
+        for (int row = 0; row < seriesModel_.rowCount(); ++row) {
+            if (seriesModel_.data(seriesModel_.index(row, 0), Models::SeriesListModel::IdRole).toString() == currentSeriesId_) {
+                stillExists = true;
+                break;
+            }
+        }
+        if (!stillExists) {
+            currentSeriesId_.clear();
+            emit currentSeriesChanged();
+        }
+    }
+}
+
+void AppController::refreshSeriesContent()
+{
+    seriesContentModel_.setItems(currentSeriesId_.isEmpty() ? std::vector<Domain::ContentSummary>{}
+                                                            : contentRepository_->listContentForSeries(currentSeriesId_));
 }
 
 void AppController::refreshGoals()

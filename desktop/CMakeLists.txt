@@ -106,6 +106,7 @@ qt_add_resources(SmToolApp smtool_resources
     FILES
         resources/migrations/001_initial.sql
         resources/migrations/002_goals.sql
+        resources/migrations/003_series_positions.sql
 )
 
 target_include_directories(SmToolApp PRIVATE src)
@@ -158,6 +159,7 @@ qt_add_resources(SmToolTests smtool_test_resources
     FILES
         resources/migrations/001_initial.sql
         resources/migrations/002_goals.sql
+        resources/migrations/003_series_positions.sql
 )
 
 target_link_libraries(SmToolTests

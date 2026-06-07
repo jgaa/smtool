@@ -566,7 +566,7 @@ bool Database::applyMigrations(QString *errorMessage)
     }
 
     const auto currentVersion = currentVersionQuery.value(0).toInt();
-    constexpr int latestVersion = 2;
+    constexpr int latestVersion = 3;
     if (currentVersion >= latestVersion) {
         return true;
     }
@@ -812,6 +812,8 @@ QString Database::resourceMigrationPath(int version) const
         return QStringLiteral(":/resources/migrations/001_initial.sql");
     case 2:
         return QStringLiteral(":/resources/migrations/002_goals.sql");
+    case 3:
+        return QStringLiteral(":/resources/migrations/003_series_positions.sql");
     default:
         return {};
     }

@@ -52,6 +52,9 @@ private slots:
     void seedsContentStatuses();
     void enforcesForeignKeys();
     void createsSeriesAndContentRelationships();
+    void ordersSeriesContentAndMovesItems();
+    void disallowsAssigningContentToArchivedSeries();
+    void deletesSeriesOnlyWhenUnused();
     void burstGenerationIsIdempotent();
     void burstGenerationSupportsSelectedAlternatives();
     void calendarShowsContentAndPublicationSchedules();
@@ -59,14 +62,20 @@ private slots:
     void reopensDatabaseAtNewPath();
     void createsIdeaFromPlainText();
     void createsIdeaFromMarkdown();
+    void createsIdeaFromTextUsesConfiguredDefaultPriority();
     void importsIdeaFromPlainTextFile();
     void importsIdeasFromMarkdownFileSections();
+    void importsMarkdownFileAsSingleIdeaWhenBatchDisabled();
+    void rejectsUnsupportedIdeaImportFileExtension();
     void allowsArbitraryStatusTransition();
     void preventsDeletingSystemOrReferencedStatuses();
     void deletesContentTree();
     void updatesContentFields();
     void normalizesAndCachesTags();
+    void sortsInboxByCreatedAtThenPriority();
+    void sortsBoardByUpdatedAtThenPriority();
     void sortsAllContentByDueDateThenTitle();
+    void sortsAllContentByPriorityThenTitle();
     void searchesContentByTextAndTags();
     void searchesSeriesByNameAndDescription();
     void contentModelBuildsDescriptionPreview();
@@ -113,7 +122,7 @@ void DatabaseTests::createsGoalTablesAndAppliesLatestMigration()
     QSqlQuery query{database.connection()};
     QVERIFY(query.exec(QStringLiteral("SELECT COALESCE(MAX(version), 0) FROM schema_migrations")));
     QVERIFY(query.next());
-    QCOMPARE(query.value(0).toInt(), 2);
+    QCOMPARE(query.value(0).toInt(), 3);
 
     QVERIFY(query.exec(QStringLiteral("SELECT COUNT(*) FROM goals")));
     QVERIFY(query.next());
@@ -217,6 +226,161 @@ void DatabaseTests::createsSeriesAndContentRelationships()
 
     const auto roots = contentRepository.rootItems(false);
     QVERIFY(std::ranges::any_of(roots, [&](const auto &item) { return item.id == sourceId; }));
+}
+
+void DatabaseTests::ordersSeriesContentAndMovesItems()
+{
+    SmTool::Data::Database database({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-series-order"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto lookups = SmTool::Data::LookupsRepository{database.connection()};
+    auto seriesRepository = SmTool::Data::SeriesRepository{database.connection()};
+    auto contentRepository = SmTool::Data::ContentRepository{database.connection()};
+
+    const auto pillarId = lookups.lookupIdByKey(QStringLiteral("pillar"), QStringLiteral("tech"));
+    const auto kindId = lookups.lookupIdByKey(QStringLiteral("content_kind"), QStringLiteral("blog_post"));
+    QVERIFY(!pillarId.isEmpty());
+    QVERIFY(!kindId.isEmpty());
+
+    const auto seriesId = seriesRepository.create(QStringLiteral("Ordered Series"),
+                                                  QStringLiteral("Description"),
+                                                  pillarId,
+                                                  QStringLiteral("active"),
+                                                  &errorMessage);
+    QVERIFY2(!seriesId.isEmpty(), qPrintable(errorMessage));
+
+    const auto firstId = contentRepository.createInSeries(seriesId, {
+        .title = QStringLiteral("First"),
+        .kindId = kindId,
+        .pillarId = pillarId,
+        .status = QStringLiteral("inbox"),
+        .priority = 10,
+    }, &errorMessage);
+    QVERIFY2(!firstId.isEmpty(), qPrintable(errorMessage));
+
+    const auto secondId = contentRepository.createInSeries(seriesId, {
+        .title = QStringLiteral("Second"),
+        .kindId = kindId,
+        .pillarId = pillarId,
+        .status = QStringLiteral("scheduled"),
+        .priority = 20,
+        .scheduledAt = QDateTime::fromString(QStringLiteral("2026-06-12T09:00:00Z"), Qt::ISODate),
+    }, &errorMessage);
+    QVERIFY2(!secondId.isEmpty(), qPrintable(errorMessage));
+
+    const auto thirdId = contentRepository.createInSeries(seriesId, {
+        .title = QStringLiteral("Third"),
+        .kindId = kindId,
+        .pillarId = pillarId,
+        .status = QStringLiteral("drafting"),
+        .priority = 30,
+    }, &errorMessage);
+    QVERIFY2(!thirdId.isEmpty(), qPrintable(errorMessage));
+
+    auto items = contentRepository.listContentForSeries(seriesId);
+    QCOMPARE(static_cast<int>(items.size()), 3);
+    QCOMPARE(items.at(0).title, QStringLiteral("First"));
+    QCOMPARE(items.at(0).seriesPosition, 1);
+    QCOMPARE(items.at(1).title, QStringLiteral("Second"));
+    QCOMPARE(items.at(1).seriesPosition, 2);
+    QCOMPARE(items.at(2).title, QStringLiteral("Third"));
+    QCOMPARE(items.at(2).seriesPosition, 3);
+
+    QVERIFY2(contentRepository.moveSeriesItem(seriesId, thirdId, -1, &errorMessage), qPrintable(errorMessage));
+    items = contentRepository.listContentForSeries(seriesId);
+    QCOMPARE(items.at(0).title, QStringLiteral("First"));
+    QCOMPARE(items.at(1).title, QStringLiteral("Third"));
+    QCOMPARE(items.at(1).seriesPosition, 2);
+    QCOMPARE(items.at(2).title, QStringLiteral("Second"));
+    QCOMPARE(items.at(2).seriesPosition, 3);
+
+    QVERIFY2(contentRepository.removeContentFromSeries(secondId, &errorMessage), qPrintable(errorMessage));
+    const auto removed = contentRepository.getById(secondId);
+    QVERIFY(removed.seriesId.isEmpty());
+    QVERIFY(!removed.hasSeriesPosition);
+}
+
+void DatabaseTests::disallowsAssigningContentToArchivedSeries()
+{
+    SmTool::Data::Database database({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-series-archived-assignment"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto lookups = SmTool::Data::LookupsRepository{database.connection()};
+    auto seriesRepository = SmTool::Data::SeriesRepository{database.connection()};
+    auto contentRepository = SmTool::Data::ContentRepository{database.connection()};
+
+    const auto pillarId = lookups.lookupIdByKey(QStringLiteral("pillar"), QStringLiteral("tech"));
+    const auto kindId = lookups.lookupIdByKey(QStringLiteral("content_kind"), QStringLiteral("idea"));
+    const auto seriesId = seriesRepository.create(QStringLiteral("Archived Series"),
+                                                  QStringLiteral("Description"),
+                                                  pillarId,
+                                                  QStringLiteral("archived"),
+                                                  &errorMessage);
+    QVERIFY2(!seriesId.isEmpty(), qPrintable(errorMessage));
+
+    const auto contentId = contentRepository.create({
+        .title = QStringLiteral("Loose content"),
+        .kindId = kindId,
+        .pillarId = pillarId,
+        .status = QStringLiteral("inbox"),
+        .priority = 5,
+    }, &errorMessage);
+    QVERIFY2(!contentId.isEmpty(), qPrintable(errorMessage));
+
+    QVERIFY(!contentRepository.assignContentToSeries(contentId, seriesId, &errorMessage));
+    QVERIFY(errorMessage.contains(QStringLiteral("archived"), Qt::CaseInsensitive));
+}
+
+void DatabaseTests::deletesSeriesOnlyWhenUnused()
+{
+    SmTool::Data::Database database({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-series-delete-rules"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto lookups = SmTool::Data::LookupsRepository{database.connection()};
+    auto seriesRepository = SmTool::Data::SeriesRepository{database.connection()};
+    auto contentRepository = SmTool::Data::ContentRepository{database.connection()};
+
+    const auto pillarId = lookups.lookupIdByKey(QStringLiteral("pillar"), QStringLiteral("tech"));
+    const auto kindId = lookups.lookupIdByKey(QStringLiteral("content_kind"), QStringLiteral("idea"));
+
+    const auto usedSeriesId = seriesRepository.create(QStringLiteral("Used Series"),
+                                                      QStringLiteral("Description"),
+                                                      pillarId,
+                                                      QStringLiteral("active"),
+                                                      &errorMessage);
+    QVERIFY2(!usedSeriesId.isEmpty(), qPrintable(errorMessage));
+
+    QVERIFY2(!contentRepository.createInSeries(usedSeriesId, {
+        .title = QStringLiteral("Series item"),
+        .kindId = kindId,
+        .pillarId = pillarId,
+        .status = QStringLiteral("inbox"),
+        .priority = 1,
+    }, &errorMessage).isEmpty(), qPrintable(errorMessage));
+
+    QVERIFY(!seriesRepository.remove(usedSeriesId, &errorMessage));
+    QVERIFY(errorMessage.contains(QStringLiteral("Archive"), Qt::CaseInsensitive));
+
+    const auto emptySeriesId = seriesRepository.create(QStringLiteral("Empty Series"),
+                                                       QStringLiteral("Description"),
+                                                       pillarId,
+                                                       QStringLiteral("active"),
+                                                       &errorMessage);
+    QVERIFY2(!emptySeriesId.isEmpty(), qPrintable(errorMessage));
+    QVERIFY2(seriesRepository.remove(emptySeriesId, &errorMessage), qPrintable(errorMessage));
+    QVERIFY(seriesRepository.getById(emptySeriesId).id.isEmpty());
 }
 
 void DatabaseTests::burstGenerationIsIdempotent()
@@ -531,6 +695,23 @@ void DatabaseTests::createsIdeaFromMarkdown()
              QStringLiteral("Burst generation notes"));
 }
 
+void DatabaseTests::createsIdeaFromTextUsesConfiguredDefaultPriority()
+{
+    SmTool::App::AppController controller({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-controller-default-priority"),
+    });
+    controller.setDefaultContentPriority(42);
+    QString errorMessage;
+    QVERIFY2(controller.initialize(&errorMessage), qPrintable(errorMessage));
+
+    QVERIFY(controller.createIdeaFromText(QStringLiteral("Priority should come from settings.")));
+    QCOMPARE(controller.inboxModel()->rowCount(), 1);
+    QCOMPARE(controller.inboxModel()->data(controller.inboxModel()->index(0, 0),
+                                           SmTool::Models::ContentListModel::PriorityRole).toInt(),
+             42);
+}
+
 void DatabaseTests::importsIdeaFromPlainTextFile()
 {
     SmTool::App::AppController controller({
@@ -570,6 +751,41 @@ void DatabaseTests::importsIdeasFromMarkdownFileSections()
     }
     QVERIFY(titles.contains(QStringLiteral("First idea")));
     QVERIFY(titles.contains(QStringLiteral("Second idea")));
+}
+
+void DatabaseTests::importsMarkdownFileAsSingleIdeaWhenBatchDisabled()
+{
+    SmTool::App::AppController controller({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-import-markdown-single"),
+    });
+    controller.setBatchMarkdownImportsEnabled(false);
+    QString errorMessage;
+    QVERIFY2(controller.initialize(&errorMessage), qPrintable(errorMessage));
+
+    const auto markdown = QStringLiteral(
+        "# First idea\n\nAlpha body.\n\n---\n\n# Second idea\n\nBeta body.\n");
+    const auto filePath = writeTempTextFile(QStringLiteral(".md"), markdown);
+    QVERIFY(controller.importIdeasFromFile(filePath));
+    QCOMPARE(controller.inboxModel()->rowCount(), 1);
+    QCOMPARE(controller.inboxModel()->data(controller.inboxModel()->index(0, 0),
+                                           SmTool::Models::ContentListModel::TitleRole).toString(),
+             QStringLiteral("First idea"));
+}
+
+void DatabaseTests::rejectsUnsupportedIdeaImportFileExtension()
+{
+    SmTool::App::AppController controller({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-import-unsupported-extension"),
+    });
+    QString errorMessage;
+    QVERIFY2(controller.initialize(&errorMessage), qPrintable(errorMessage));
+
+    const auto filePath = writeTempTextFile(QStringLiteral(".markdown"),
+                                            QStringLiteral("# Unsupported\n\nShould not import.\n"));
+    QVERIFY(!controller.importIdeasFromFile(filePath));
+    QCOMPARE(controller.inboxModel()->rowCount(), 0);
 }
 
 void DatabaseTests::allowsArbitraryStatusTransition()
@@ -807,6 +1023,121 @@ void DatabaseTests::normalizesAndCachesTags()
     QCOMPARE(query.value(0).toString(), QStringLiteral("build-log local_first qt6"));
 }
 
+void DatabaseTests::sortsInboxByCreatedAtThenPriority()
+{
+    SmTool::Data::Database database({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-inbox-sort"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto lookups = SmTool::Data::LookupsRepository{database.connection()};
+    auto contentRepository = SmTool::Data::ContentRepository{database.connection()};
+
+    const auto pillarId = lookups.lookupIdByKey(QStringLiteral("pillar"), QStringLiteral("tech"));
+    const auto kindId = lookups.lookupIdByKey(QStringLiteral("content_kind"), QStringLiteral("idea"));
+
+    QVERIFY2(!contentRepository.create({
+        .title = QStringLiteral("Older High"),
+        .kindId = kindId,
+        .pillarId = pillarId,
+        .status = QStringLiteral("inbox"),
+        .priority = 99,
+        .createdAt = QDateTime::fromString(QStringLiteral("2026-06-01T10:00:00Z"), Qt::ISODate),
+        .updatedAt = QDateTime::fromString(QStringLiteral("2026-06-01T10:00:00Z"), Qt::ISODate),
+    }, &errorMessage).isEmpty(), qPrintable(errorMessage));
+
+    QVERIFY2(!contentRepository.create({
+        .title = QStringLiteral("Newer Low"),
+        .kindId = kindId,
+        .pillarId = pillarId,
+        .status = QStringLiteral("inbox"),
+        .priority = 1,
+        .createdAt = QDateTime::fromString(QStringLiteral("2026-06-02T10:00:00Z"), Qt::ISODate),
+        .updatedAt = QDateTime::fromString(QStringLiteral("2026-06-02T10:00:00Z"), Qt::ISODate),
+    }, &errorMessage).isEmpty(), qPrintable(errorMessage));
+
+    QVERIFY2(!contentRepository.create({
+        .title = QStringLiteral("Newest Higher"),
+        .kindId = kindId,
+        .pillarId = pillarId,
+        .status = QStringLiteral("inbox"),
+        .priority = 50,
+        .createdAt = QDateTime::fromString(QStringLiteral("2026-06-03T10:00:00Z"), Qt::ISODate),
+        .updatedAt = QDateTime::fromString(QStringLiteral("2026-06-03T10:00:00Z"), Qt::ISODate),
+    }, &errorMessage).isEmpty(), qPrintable(errorMessage));
+
+    QVERIFY2(!contentRepository.create({
+        .title = QStringLiteral("Newest Lower"),
+        .kindId = kindId,
+        .pillarId = pillarId,
+        .status = QStringLiteral("inbox"),
+        .priority = 5,
+        .createdAt = QDateTime::fromString(QStringLiteral("2026-06-03T10:00:00Z"), Qt::ISODate),
+        .updatedAt = QDateTime::fromString(QStringLiteral("2026-06-03T10:00:00Z"), Qt::ISODate),
+    }, &errorMessage).isEmpty(), qPrintable(errorMessage));
+
+    const auto items = contentRepository.inboxItems();
+    QVERIFY(items.size() >= 4);
+    QCOMPARE(items.at(0).title, QStringLiteral("Newest Higher"));
+    QCOMPARE(items.at(1).title, QStringLiteral("Newest Lower"));
+    QCOMPARE(items.at(2).title, QStringLiteral("Newer Low"));
+    QCOMPARE(items.at(3).title, QStringLiteral("Older High"));
+}
+
+void DatabaseTests::sortsBoardByUpdatedAtThenPriority()
+{
+    SmTool::Data::Database database({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-board-sort"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto lookups = SmTool::Data::LookupsRepository{database.connection()};
+    auto contentRepository = SmTool::Data::ContentRepository{database.connection()};
+
+    const auto pillarId = lookups.lookupIdByKey(QStringLiteral("pillar"), QStringLiteral("tech"));
+    const auto kindId = lookups.lookupIdByKey(QStringLiteral("content_kind"), QStringLiteral("idea"));
+
+    QVERIFY2(!contentRepository.create({
+        .title = QStringLiteral("Older High"),
+        .kindId = kindId,
+        .pillarId = pillarId,
+        .status = QStringLiteral("shaping"),
+        .priority = 99,
+        .createdAt = QDateTime::fromString(QStringLiteral("2026-06-01T10:00:00Z"), Qt::ISODate),
+        .updatedAt = QDateTime::fromString(QStringLiteral("2026-06-01T10:00:00Z"), Qt::ISODate),
+    }, &errorMessage).isEmpty(), qPrintable(errorMessage));
+
+    QVERIFY2(!contentRepository.create({
+        .title = QStringLiteral("Newest Higher"),
+        .kindId = kindId,
+        .pillarId = pillarId,
+        .status = QStringLiteral("shaping"),
+        .priority = 50,
+        .createdAt = QDateTime::fromString(QStringLiteral("2026-06-02T10:00:00Z"), Qt::ISODate),
+        .updatedAt = QDateTime::fromString(QStringLiteral("2026-06-03T10:00:00Z"), Qt::ISODate),
+    }, &errorMessage).isEmpty(), qPrintable(errorMessage));
+
+    QVERIFY2(!contentRepository.create({
+        .title = QStringLiteral("Newest Lower"),
+        .kindId = kindId,
+        .pillarId = pillarId,
+        .status = QStringLiteral("shaping"),
+        .priority = 5,
+        .createdAt = QDateTime::fromString(QStringLiteral("2026-06-02T10:00:00Z"), Qt::ISODate),
+        .updatedAt = QDateTime::fromString(QStringLiteral("2026-06-03T10:00:00Z"), Qt::ISODate),
+    }, &errorMessage).isEmpty(), qPrintable(errorMessage));
+
+    const auto items = contentRepository.boardItems(QStringLiteral("shaping"), false);
+    QVERIFY(items.size() >= 3);
+    QCOMPARE(items.at(0).title, QStringLiteral("Newest Higher"));
+    QCOMPARE(items.at(1).title, QStringLiteral("Newest Lower"));
+    QCOMPARE(items.at(2).title, QStringLiteral("Older High"));
+}
+
 void DatabaseTests::sortsAllContentByDueDateThenTitle()
 {
     SmTool::Data::Database database({
@@ -859,6 +1190,58 @@ void DatabaseTests::sortsAllContentByDueDateThenTitle()
     QCOMPARE(items.at(0).title, QStringLiteral("Alpha"));
     QCOMPARE(items.at(1).title, QStringLiteral("Zulu"));
     QCOMPARE(items.back().title, QStringLiteral("No Date"));
+}
+
+void DatabaseTests::sortsAllContentByPriorityThenTitle()
+{
+    SmTool::Data::Database database({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-all-content-priority-sort"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto lookups = SmTool::Data::LookupsRepository{database.connection()};
+    auto contentRepository = SmTool::Data::ContentRepository{database.connection()};
+
+    const auto pillarId = lookups.lookupIdByKey(QStringLiteral("pillar"), QStringLiteral("tech"));
+    const auto kindId = lookups.lookupIdByKey(QStringLiteral("content_kind"), QStringLiteral("idea"));
+
+    QVERIFY2(!contentRepository.create({
+        .title = QStringLiteral("Zulu"),
+        .kindId = kindId,
+        .pillarId = pillarId,
+        .status = QStringLiteral("inbox"),
+        .priority = 50,
+        .createdAt = QDateTime::currentDateTimeUtc(),
+        .updatedAt = QDateTime::currentDateTimeUtc(),
+    }, &errorMessage).isEmpty(), qPrintable(errorMessage));
+
+    QVERIFY2(!contentRepository.create({
+        .title = QStringLiteral("Alpha"),
+        .kindId = kindId,
+        .pillarId = pillarId,
+        .status = QStringLiteral("inbox"),
+        .priority = 50,
+        .createdAt = QDateTime::currentDateTimeUtc(),
+        .updatedAt = QDateTime::currentDateTimeUtc(),
+    }, &errorMessage).isEmpty(), qPrintable(errorMessage));
+
+    QVERIFY2(!contentRepository.create({
+        .title = QStringLiteral("High"),
+        .kindId = kindId,
+        .pillarId = pillarId,
+        .status = QStringLiteral("inbox"),
+        .priority = 80,
+        .createdAt = QDateTime::currentDateTimeUtc(),
+        .updatedAt = QDateTime::currentDateTimeUtc(),
+    }, &errorMessage).isEmpty(), qPrintable(errorMessage));
+
+    const auto items = contentRepository.allItems(false, SmTool::Data::ContentRepository::SortMode::PriorityAlphabetical);
+    QVERIFY(items.size() >= 3);
+    QCOMPARE(items.at(0).title, QStringLiteral("High"));
+    QCOMPARE(items.at(1).title, QStringLiteral("Alpha"));
+    QCOMPARE(items.at(2).title, QStringLiteral("Zulu"));
 }
 
 void DatabaseTests::searchesContentByTextAndTags()
