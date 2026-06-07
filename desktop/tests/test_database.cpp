@@ -13,6 +13,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QFile>
+#include <QSqlError>
 #include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -55,6 +56,7 @@ private slots:
     void ordersSeriesContentAndMovesItems();
     void disallowsAssigningContentToArchivedSeries();
     void deletesSeriesOnlyWhenUnused();
+    void fanOutUsesChannelsAsAlternatives();
     void burstGenerationIsIdempotent();
     void burstGenerationSupportsSelectedAlternatives();
     void calendarShowsContentAndPublicationSchedules();
@@ -103,11 +105,48 @@ void DatabaseTests::createsSchemaAndSeedsDefaults()
 
     QVERIFY(query.exec(QStringLiteral("SELECT COUNT(*) FROM burst_template")));
     QVERIFY(query.next());
-    QCOMPARE(query.value(0).toInt(), 5);
+    QCOMPARE(query.value(0).toInt(), 10);
 
     QVERIFY(query.exec(QStringLiteral("SELECT COUNT(*) FROM channel")));
     QVERIFY(query.next());
     QCOMPARE(query.value(0).toInt(), 10);
+}
+
+void DatabaseTests::fanOutUsesChannelsAsAlternatives()
+{
+    const auto databasePath = createTempDatabasePath();
+    SmTool::Data::Database database({
+        .databaseFilePath = databasePath,
+        .connectionName = QStringLiteral("test-fanout-channels"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    QSqlQuery renameQuery{database.connection()};
+    renameQuery.prepare(QStringLiteral("UPDATE channel SET display_name = 'LinkedIn Custom' WHERE key = 'linkedin'"));
+    QVERIFY2(renameQuery.exec(), qPrintable(renameQuery.lastError().text()));
+    database.connection().close();
+
+    SmTool::Data::Database reopened({
+        .databaseFilePath = databasePath,
+        .connectionName = QStringLiteral("test-fanout-channels-reopen"),
+    });
+    QVERIFY2(reopened.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto contentRepository = SmTool::Data::ContentRepository{reopened.connection()};
+    const auto templates = contentRepository.activeBurstTemplates();
+    QCOMPARE(static_cast<int>(templates.size()), 10);
+
+    bool foundLinkedIn = false;
+    for (const auto &templateItem : templates) {
+        QVERIFY(templateItem.key.startsWith(QStringLiteral("fanout_")));
+        if (templateItem.key == QStringLiteral("fanout_linkedin")) {
+            QCOMPARE(templateItem.displayName, QStringLiteral("LinkedIn Custom"));
+            QCOMPARE(templateItem.suggestedChannelName, QStringLiteral("LinkedIn Custom"));
+            foundLinkedIn = true;
+        }
+    }
+    QVERIFY(foundLinkedIn);
 }
 
 void DatabaseTests::createsGoalTablesAndAppliesLatestMigration()
@@ -412,12 +451,12 @@ void DatabaseTests::burstGenerationIsIdempotent()
     QVERIFY2(contentRepository.createBurst(sourceId, &errorMessage), qPrintable(errorMessage));
 
     const auto children = contentRepository.childItems(sourceId);
-    QCOMPARE(static_cast<int>(children.size()), 5);
+    QCOMPARE(static_cast<int>(children.size()), 10);
 
     QSqlQuery query{database.connection()};
     QVERIFY(query.exec(QStringLiteral("SELECT COUNT(*) FROM content WHERE parent_id IS NOT NULL")));
     QVERIFY(query.next());
-    QCOMPARE(query.value(0).toInt(), 5);
+    QCOMPARE(query.value(0).toInt(), 10);
 }
 
 void DatabaseTests::burstGenerationSupportsSelectedAlternatives()
@@ -446,8 +485,8 @@ void DatabaseTests::burstGenerationSupportsSelectedAlternatives()
     QVERIFY2(!sourceId.isEmpty(), qPrintable(errorMessage));
 
     const QStringList selectedKeys{
-        QStringLiteral("newsletter_summary"),
-        QStringLiteral("short_video_excerpt"),
+        QStringLiteral("fanout_newsletter"),
+        QStringLiteral("fanout_youtube"),
     };
     QVERIFY2(contentRepository.createBurst(sourceId, selectedKeys, &errorMessage), qPrintable(errorMessage));
     QVERIFY2(contentRepository.createBurst(sourceId, selectedKeys, &errorMessage), qPrintable(errorMessage));

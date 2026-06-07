@@ -261,7 +261,7 @@ ApplicationWindow {
 
         function openForSource() {
             optionsModel = appController.burstTemplateOptions()
-            selectedKeys = optionsModel.map(function(option) { return option.key })
+            selectedKeys = []
             open()
         }
 
@@ -2316,6 +2316,13 @@ ApplicationWindow {
                         }
 
                         delegate: ContentSummaryCard {
+                            required property string itemId
+                            required property string title
+                            required property string kind
+                            required property string outcome
+                            required property string suggestedChannel
+                            required property string status
+                            required property string burstTemplateKey
                             required property string displayTags
                             required property int priority
                             required property string series

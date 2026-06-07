@@ -30,6 +30,7 @@ struct BurstTemplate {
     QString titleSuffix;
     QString kindId;
     QString suggestedChannelId;
+    QString suggestedChannelName;
     QString outcomeId;
     bool isActive = true;
 };

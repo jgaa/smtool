@@ -23,28 +23,11 @@ using namespace Qt::Literals::StringLiterals;
 namespace SmTool::Data {
 namespace {
 
-struct BurstTemplateSeed {
-    QLatin1StringView key;
-    QLatin1StringView displayName;
-    QLatin1StringView titleSuffix;
-    QLatin1StringView kindKey;
-    QLatin1StringView channelKey;
-    QLatin1StringView outcomeKey;
-};
-
 struct ContentStatusSeed {
     QLatin1StringView id;
     QLatin1StringView info;
     int sortOrder;
     bool isSystem;
-};
-
-constexpr auto burstTemplates = std::array{
-    BurstTemplateSeed{"linkedin_key_lesson"_L1, "LinkedIn Key Lesson"_L1, " - Key Lesson"_L1, "short_post"_L1, "linkedin"_L1, "authority"_L1},
-    BurstTemplateSeed{"linkedin_opinion_angle"_L1, "LinkedIn Opinion Angle"_L1, " - Opinion Angle"_L1, "short_post"_L1, "linkedin"_L1, "discussion"_L1},
-    BurstTemplateSeed{"mastodon_technical_note"_L1, "Mastodon Technical Note"_L1, " - Technical Note"_L1, "short_post"_L1, "mastodon"_L1, "authority"_L1},
-    BurstTemplateSeed{"short_video_excerpt"_L1, "Short Video Excerpt"_L1, " - Video Excerpt"_L1, "clip"_L1, "youtube"_L1, "trust"_L1},
-    BurstTemplateSeed{"newsletter_summary"_L1, "Newsletter Summary"_L1, " - Newsletter Summary"_L1, "newsletter"_L1, "newsletter"_L1, "trust"_L1},
 };
 
 constexpr auto contentStatuses = std::array{
@@ -344,6 +327,8 @@ bool executeQuery(QSqlQuery &query, QString *errorMessage)
     return false;
 }
 
+QString lookupIdByKey(QSqlDatabase db, QAnyStringView tableName, QAnyStringView key, QString *errorMessage);
+
 bool insertLookup(QSqlDatabase db, const QString &tableName, QAnyStringView key, int sortOrder, QString *errorMessage)
 {
     QSqlQuery query{db};
@@ -369,6 +354,104 @@ bool insertContentStatus(QSqlDatabase db, const ContentStatusSeed &seed, QString
     query.bindValue(":sort_order"_L1, seed.sortOrder);
     query.bindValue(":is_system"_L1, seed.isSystem ? 1 : 0);
     return executeQuery(query, errorMessage);
+}
+
+QString managedFanOutTemplateKey(const QString &channelKey)
+{
+    return QStringLiteral("fanout_%1").arg(channelKey);
+}
+
+QString defaultFanOutKindKey(const QString &channelKey)
+{
+    if (channelKey == "blog"_L1) {
+        return QStringLiteral("blog_post");
+    }
+    if (channelKey == "youtube"_L1 || channelKey == "tiktok"_L1) {
+        return QStringLiteral("clip");
+    }
+    if (channelKey == "newsletter"_L1) {
+        return QStringLiteral("newsletter");
+    }
+    return QStringLiteral("short_post");
+}
+
+QString defaultFanOutOutcomeKey(const QString &channelKey)
+{
+    if (channelKey == "blog"_L1 || channelKey == "youtube"_L1 || channelKey == "newsletter"_L1 || channelKey == "tiktok"_L1) {
+        return QStringLiteral("trust");
+    }
+    return QStringLiteral("authority");
+}
+
+bool syncFanOutTemplates(QSqlDatabase db, QString *errorMessage)
+{
+    const auto shortPostKindId = lookupIdByKey(db, "content_kind"_L1, "short_post"_L1, errorMessage);
+    const auto clipKindId = lookupIdByKey(db, "content_kind"_L1, "clip"_L1, errorMessage);
+    const auto newsletterKindId = lookupIdByKey(db, "content_kind"_L1, "newsletter"_L1, errorMessage);
+    const auto blogPostKindId = lookupIdByKey(db, "content_kind"_L1, "blog_post"_L1, errorMessage);
+    const auto authorityOutcomeId = lookupIdByKey(db, "outcome"_L1, "authority"_L1, errorMessage);
+    const auto trustOutcomeId = lookupIdByKey(db, "outcome"_L1, "trust"_L1, errorMessage);
+    if (shortPostKindId.isEmpty() || clipKindId.isEmpty() || newsletterKindId.isEmpty() || blogPostKindId.isEmpty()
+        || authorityOutcomeId.isEmpty() || trustOutcomeId.isEmpty()) {
+        return false;
+    }
+
+    QSqlQuery deactivateQuery{db};
+    deactivateQuery.prepare(QStringLiteral("UPDATE burst_template SET is_active = 0"));
+    if (!executeQuery(deactivateQuery, errorMessage)) {
+        return false;
+    }
+
+    QSqlQuery channelQuery{db};
+    channelQuery.prepare(QStringLiteral(
+        "SELECT id, key, display_name, is_active "
+        "FROM channel "
+        "ORDER BY sort_order ASC, display_name ASC"));
+    if (!channelQuery.exec()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = channelQuery.lastError().text();
+        }
+        return false;
+    }
+
+    while (channelQuery.next()) {
+        const auto channelId = channelQuery.value(0).toString();
+        const auto channelKey = channelQuery.value(1).toString();
+        const auto channelDisplayName = channelQuery.value(2).toString();
+        const auto isActive = channelQuery.value(3).toBool();
+        const auto kindKey = defaultFanOutKindKey(channelKey);
+        const auto outcomeKey = defaultFanOutOutcomeKey(channelKey);
+        const auto kindId = kindKey == "clip"_L1 ? clipKindId
+                           : kindKey == "newsletter"_L1 ? newsletterKindId
+                           : kindKey == "blog_post"_L1  ? blogPostKindId
+                                                        : shortPostKindId;
+        const auto outcomeId = outcomeKey == "trust"_L1 ? trustOutcomeId : authorityOutcomeId;
+
+        QSqlQuery upsertQuery{db};
+        upsertQuery.prepare(QStringLiteral(
+            "INSERT INTO burst_template "
+            "(key, display_name, title_suffix, kind_id, suggested_channel_id, outcome_id, is_active) "
+            "VALUES (:key, :display_name, :title_suffix, :kind_id, :suggested_channel_id, :outcome_id, :is_active) "
+            "ON CONFLICT(key) DO UPDATE SET "
+            "display_name = excluded.display_name, "
+            "title_suffix = excluded.title_suffix, "
+            "kind_id = excluded.kind_id, "
+            "suggested_channel_id = excluded.suggested_channel_id, "
+            "outcome_id = excluded.outcome_id, "
+            "is_active = excluded.is_active"));
+        upsertQuery.bindValue(":key"_L1, managedFanOutTemplateKey(channelKey));
+        upsertQuery.bindValue(":display_name"_L1, channelDisplayName);
+        upsertQuery.bindValue(":title_suffix"_L1, QStringLiteral(" - %1").arg(channelDisplayName));
+        upsertQuery.bindValue(":kind_id"_L1, kindId);
+        upsertQuery.bindValue(":suggested_channel_id"_L1, channelId);
+        upsertQuery.bindValue(":outcome_id"_L1, outcomeId);
+        upsertQuery.bindValue(":is_active"_L1, isActive ? 1 : 0);
+        if (!executeQuery(upsertQuery, errorMessage)) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 QString lookupIdByKey(QSqlDatabase db, QAnyStringView tableName, QAnyStringView key, QString *errorMessage)
@@ -682,23 +765,8 @@ bool Database::seedDefaults(QString *errorMessage)
         }
     }
 
-    if (!tableHasRows(db, "burst_template"_L1, errorMessage)) {
-        for (const auto &seed : burstTemplates) {
-            QSqlQuery insertQuery{db};
-            insertQuery.prepare(QStringLiteral(
-                "INSERT INTO burst_template "
-                "(key, display_name, title_suffix, kind_id, suggested_channel_id, outcome_id, is_active) "
-                "VALUES (:key, :display_name, :title_suffix, :kind_id, :suggested_channel_id, :outcome_id, 1)"));
-            insertQuery.bindValue(":key"_L1, seed.key.toString());
-            insertQuery.bindValue(":display_name"_L1, seed.displayName.toString());
-            insertQuery.bindValue(":title_suffix"_L1, seed.titleSuffix.toString());
-            insertQuery.bindValue(":kind_id"_L1, lookupIdByKey(db, "content_kind"_L1, seed.kindKey, errorMessage));
-            insertQuery.bindValue(":suggested_channel_id"_L1, lookupIdByKey(db, "channel"_L1, seed.channelKey, errorMessage));
-            insertQuery.bindValue(":outcome_id"_L1, lookupIdByKey(db, "outcome"_L1, seed.outcomeKey, errorMessage));
-            if (!executeQuery(insertQuery, errorMessage)) {
-                return rollbackOnFailure();
-            }
-        }
+    if (!syncFanOutTemplates(db, errorMessage)) {
+        return rollbackOnFailure();
     }
 
     return db.commit();

@@ -441,10 +441,12 @@ std::vector<Domain::BurstTemplate> ContentRepository::activeBurstTemplates() con
 {
     QSqlQuery query{database_};
     query.prepare(QStringLiteral(
-        "SELECT key, display_name, title_suffix, kind_id, COALESCE(suggested_channel_id, ''), COALESCE(outcome_id, '') "
-        "FROM burst_template "
-        "WHERE is_active = 1 "
-        "ORDER BY display_name ASC"));
+        "SELECT bt.key, bt.display_name, bt.title_suffix, bt.kind_id, COALESCE(bt.suggested_channel_id, ''), "
+        "COALESCE(ch.display_name, ''), COALESCE(bt.outcome_id, '') "
+        "FROM burst_template bt "
+        "LEFT JOIN channel ch ON ch.id = bt.suggested_channel_id "
+        "WHERE bt.is_active = 1 "
+        "ORDER BY ch.sort_order ASC, ch.display_name ASC, bt.display_name ASC"));
     query.exec();
 
     std::vector<Domain::BurstTemplate> results;
@@ -455,7 +457,8 @@ std::vector<Domain::BurstTemplate> ContentRepository::activeBurstTemplates() con
             .titleSuffix = query.value(2).toString(),
             .kindId = query.value(3).toString(),
             .suggestedChannelId = query.value(4).toString(),
-            .outcomeId = query.value(5).toString(),
+            .suggestedChannelName = query.value(5).toString(),
+            .outcomeId = query.value(6).toString(),
         });
     }
     return results;
