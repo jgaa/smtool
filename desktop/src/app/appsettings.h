@@ -16,7 +16,9 @@ class AppSettings : public QObject
     Q_PROPERTY(QString effectiveMediaDataDir READ effectiveMediaDataDir NOTIFY configuredMediaDataDirChanged)
     Q_PROPERTY(int defaultContentPriority READ defaultContentPriority WRITE setDefaultContentPriority NOTIFY defaultContentPriorityChanged)
     Q_PROPERTY(bool batchMarkdownImports READ batchMarkdownImports WRITE setBatchMarkdownImports NOTIFY batchMarkdownImportsChanged)
-    Q_PROPERTY(int boardDescriptionPreviewWordCap READ boardDescriptionPreviewWordCap WRITE setBoardDescriptionPreviewWordCap NOTIFY boardDescriptionPreviewWordCapChanged)
+    Q_PROPERTY(int importedIdeaTitleWordCap READ importedIdeaTitleWordCap WRITE setImportedIdeaTitleWordCap NOTIFY importedIdeaTitleWordCapChanged)
+    Q_PROPERTY(int cardDescriptionWordCap READ cardDescriptionWordCap WRITE setCardDescriptionWordCap NOTIFY cardDescriptionWordCapChanged)
+    Q_PROPERTY(bool cardDescriptionMarkdownEnabled READ cardDescriptionMarkdownEnabled WRITE setCardDescriptionMarkdownEnabled NOTIFY cardDescriptionMarkdownEnabledChanged)
     Q_PROPERTY(int appLogLevel READ appLogLevel WRITE setAppLogLevel NOTIFY appLogLevelChanged)
     Q_PROPERTY(int fileLogLevel READ fileLogLevel WRITE setFileLogLevel NOTIFY fileLogLevelChanged)
     Q_PROPERTY(QString logFilePath READ logFilePath WRITE setLogFilePath NOTIFY logFilePathChanged)
@@ -43,8 +45,14 @@ public:
     [[nodiscard]] bool batchMarkdownImports() const;
     void setBatchMarkdownImports(bool enabled);
 
-    [[nodiscard]] int boardDescriptionPreviewWordCap() const;
-    void setBoardDescriptionPreviewWordCap(int value);
+    [[nodiscard]] int importedIdeaTitleWordCap() const;
+    void setImportedIdeaTitleWordCap(int value);
+
+    [[nodiscard]] int cardDescriptionWordCap() const;
+    void setCardDescriptionWordCap(int value);
+
+    [[nodiscard]] bool cardDescriptionMarkdownEnabled() const;
+    void setCardDescriptionMarkdownEnabled(bool enabled);
 
     [[nodiscard]] int appLogLevel() const;
     void setAppLogLevel(int level);
@@ -71,7 +79,9 @@ signals:
     void configuredMediaDataDirChanged();
     void defaultContentPriorityChanged();
     void batchMarkdownImportsChanged();
-    void boardDescriptionPreviewWordCapChanged();
+    void importedIdeaTitleWordCapChanged();
+    void cardDescriptionWordCapChanged();
+    void cardDescriptionMarkdownEnabledChanged();
     void appLogLevelChanged();
     void fileLogLevelChanged();
     void logFilePathChanged();
@@ -83,7 +93,8 @@ private:
     void saveValue(const QString &key, const QVariant &value) const;
     [[nodiscard]] QString normalizedPath(const QString &path) const;
     [[nodiscard]] int normalizedDefaultContentPriority(int value) const;
-    [[nodiscard]] int normalizedBoardDescriptionPreviewWordCap(int value) const;
+    [[nodiscard]] int normalizedImportedIdeaTitleWordCap(int value) const;
+    [[nodiscard]] int normalizedCardDescriptionWordCap(int value) const;
 };
 
 } // namespace SmTool::App

@@ -48,7 +48,7 @@ private:
     [[nodiscard]] QString descriptionPreview(const QString &text) const;
 
     std::vector<Domain::ContentSummary> items_;
-    int descriptionPreviewWordCap_ = 10;
+    int descriptionPreviewWordCap_ = 100;
 };
 
 } // namespace SmTool::Models

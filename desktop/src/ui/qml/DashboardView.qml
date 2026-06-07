@@ -521,6 +521,66 @@ Item {
                     color: "#666666"
                 }
             }
+
+            SectionCard {
+                title: "Statistics"
+
+                ListView {
+                    id: statisticsList
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: Math.max(180, Math.min(contentHeight + 8, 420))
+                    clip: true
+                    spacing: 8
+                    model: appController.dashboardStatisticsModel
+
+                    delegate: Rectangle {
+                        required property string displayName
+                        required property string detailText
+                        required property real actualValue
+
+                        width: ListView.view.width
+                        implicitHeight: 68
+                        radius: 8
+                        color: "#f7f7f7"
+                        border.color: "#dddddd"
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.margins: 10
+                            spacing: 12
+
+                            ColumnLayout {
+                                Layout.fillWidth: true
+
+                                Label {
+                                    text: displayName
+                                    font.bold: true
+                                }
+
+                                Label {
+                                    visible: detailText.length > 0
+                                    text: detailText
+                                    color: "#666666"
+                                    wrapMode: Text.Wrap
+                                }
+                            }
+
+                            Label {
+                                text: root.formatValue(actualValue)
+                                font.pixelSize: 22
+                                font.bold: true
+                                color: "#2f6f44"
+                            }
+                        }
+                    }
+                }
+
+                Label {
+                    visible: statisticsList.count === 0
+                    text: "No statistics available yet."
+                    color: "#666666"
+                }
+            }
         }
     }
 }

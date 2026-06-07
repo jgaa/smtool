@@ -26,6 +26,16 @@ struct FocusAccumulator {
     bool initialized = false;
 };
 
+Domain::DashboardRow makeStatisticRow(const QString &displayName, const double value, const QString &detailText = {})
+{
+    return Domain::DashboardRow{
+        .displayName = displayName,
+        .detailText = detailText,
+        .actualValue = value,
+        .health = Domain::DashboardHealth::Unknown,
+    };
+}
+
 QDate parseDateOrDefault(const QString &value, const QDate &fallback)
 {
     const auto parsed = QDate::fromString(value.trimmed(), Qt::ISODate);
@@ -332,6 +342,70 @@ QDateTime latestPublishedAt(const QSqlDatabase &database, const Domain::Goal &go
     return query.exec() && query.next() ? query.value(0).toDateTime() : QDateTime{};
 }
 
+std::vector<Domain::DashboardRow> collectStatistics(const QSqlDatabase &database)
+{
+    std::vector<Domain::DashboardRow> rows;
+
+    QSqlQuery statusQuery{database};
+    statusQuery.prepare(QStringLiteral(
+        "SELECT cs.id, COUNT(c.id) "
+        "FROM content_status cs "
+        "LEFT JOIN content c ON c.status = cs.id "
+        "GROUP BY cs.id, cs.sort_order "
+        "ORDER BY cs.sort_order ASC, cs.id ASC"));
+    if (statusQuery.exec()) {
+        while (statusQuery.next()) {
+            rows.push_back(makeStatisticRow(statusQuery.value(0).toString(),
+                                            static_cast<double>(statusQuery.value(1).toInt()),
+                                            QStringLiteral("Content items")));
+        }
+    }
+
+    QSqlQuery publishedQuery{database};
+    publishedQuery.prepare(QStringLiteral(
+        "SELECT COUNT(*) "
+        "FROM publication "
+        "WHERE status = 'published'"));
+    if (publishedQuery.exec() && publishedQuery.next()) {
+        rows.push_back(makeStatisticRow(QStringLiteral("Published items"),
+                                        static_cast<double>(publishedQuery.value(0).toInt()),
+                                        QStringLiteral("All publication records")));
+    }
+
+    const auto today = QDate::currentDate();
+    const auto startAt = startOfDayUtc(today.addDays(-6)).toString(Qt::ISODate);
+    const auto endAt = endExclusiveUtc(today).toString(Qt::ISODate);
+
+    QSqlQuery newItemsQuery{database};
+    newItemsQuery.prepare(QStringLiteral(
+        "SELECT COUNT(*) "
+        "FROM content "
+        "WHERE created_at >= :start_at "
+        "AND created_at < :end_at"));
+    newItemsQuery.bindValue(":start_at"_L1, startAt);
+    newItemsQuery.bindValue(":end_at"_L1, endAt);
+    if (newItemsQuery.exec() && newItemsQuery.next()) {
+        rows.push_back(makeStatisticRow(QStringLiteral("New items last 7 days"),
+                                        static_cast<double>(newItemsQuery.value(0).toInt())));
+    }
+
+    QSqlQuery recentPublicationsQuery{database};
+    recentPublicationsQuery.prepare(QStringLiteral(
+        "SELECT COUNT(*) "
+        "FROM publication "
+        "WHERE status = 'published' "
+        "AND COALESCE(published_at, updated_at) >= :start_at "
+        "AND COALESCE(published_at, updated_at) < :end_at"));
+    recentPublicationsQuery.bindValue(":start_at"_L1, startAt);
+    recentPublicationsQuery.bindValue(":end_at"_L1, endAt);
+    if (recentPublicationsQuery.exec() && recentPublicationsQuery.next()) {
+        rows.push_back(makeStatisticRow(QStringLiteral("Publications last 7 days"),
+                                        static_cast<double>(recentPublicationsQuery.value(0).toInt())));
+    }
+
+    return rows;
+}
+
 QString pluralizeDays(const int days)
 {
     return days == 1 ? QStringLiteral("1 day") : QStringLiteral("%1 days").arg(days);
@@ -621,7 +695,9 @@ Domain::DashboardEvaluation DashboardService::evaluate(const PeriodSelection &pe
         evaluation.recommendedFocus.resize(5);
     }
 
-    for (auto *rows : {&evaluation.goalAchievement, &evaluation.pipelineCoverage, &evaluation.balanceDeviation, &evaluation.alerts, &evaluation.recommendedFocus}) {
+    evaluation.statistics = collectStatistics(database_);
+
+    for (auto *rows : {&evaluation.goalAchievement, &evaluation.pipelineCoverage, &evaluation.balanceDeviation, &evaluation.alerts, &evaluation.recommendedFocus, &evaluation.statistics}) {
         for (auto &row : *rows) {
             row.detailText = row.detailText.trimmed();
             row.summaryText = row.summaryText.trimmed();

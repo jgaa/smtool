@@ -16,7 +16,9 @@ ScrollView {
         appSettings.configuredMediaDataDir = mediaDataDirField.text.trim()
         appSettings.defaultContentPriority = defaultContentPriorityBox.value
         appSettings.batchMarkdownImports = batchMarkdownImportsSwitch.checked
-        appSettings.boardDescriptionPreviewWordCap = previewWordCapBox.value
+        appSettings.cardDescriptionWordCap = cardDescriptionWordCapBox.value
+        appSettings.cardDescriptionMarkdownEnabled = cardDescriptionMarkdownSwitch.checked
+        appSettings.importedIdeaTitleWordCap = importedIdeaTitleWordCapBox.value
         appSettings.confirmContentDeletion = confirmDeleteSwitch.checked
         appSettings.fetchAddedUrlTitles = fetchUrlTitlesSwitch.checked
         reload()
@@ -32,7 +34,9 @@ ScrollView {
             : appSettings.defaultMediaDataDir
         defaultContentPriorityBox.value = appSettings.defaultContentPriority
         batchMarkdownImportsSwitch.checked = appSettings.batchMarkdownImports
-        previewWordCapBox.value = appSettings.boardDescriptionPreviewWordCap
+        cardDescriptionWordCapBox.value = appSettings.cardDescriptionWordCap
+        cardDescriptionMarkdownSwitch.checked = appSettings.cardDescriptionMarkdownEnabled
+        importedIdeaTitleWordCapBox.value = appSettings.importedIdeaTitleWordCap
         confirmDeleteSwitch.checked = appSettings.confirmContentDeletion
         fetchUrlTitlesSwitch.checked = appSettings.fetchAddedUrlTitles
     }
@@ -134,14 +138,61 @@ ScrollView {
         }
 
         Label {
-            text: qsTr("Board Preview Words")
+            text: qsTr("Card Description Words")
         }
 
         SpinBox {
-            id: previewWordCapBox
-            from: 3
+            id: cardDescriptionWordCapBox
+            from: 0
+            to: 500
+            value: appSettings.cardDescriptionWordCap
+        }
+
+        Item { }
+
+        Label {
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            text: qsTr("Limits description text shown in cards across the app. Use 0 to show the full description with no word cap.")
+            color: palette.mid
+        }
+
+        Label {
+            text: qsTr("Card Description Markdown")
+        }
+
+        Switch {
+            id: cardDescriptionMarkdownSwitch
+            checked: appSettings.cardDescriptionMarkdownEnabled
+        }
+
+        Item { }
+
+        Label {
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            text: qsTr("When enabled, card descriptions render Markdown formatting. Turn this off to show raw plain text instead.")
+            color: palette.mid
+        }
+
+        Label {
+            text: qsTr("Imported Header Words")
+        }
+
+        SpinBox {
+            id: importedIdeaTitleWordCapBox
+            from: 1
             to: 30
-            value: appSettings.boardDescriptionPreviewWordCap
+            value: appSettings.importedIdeaTitleWordCap
+        }
+
+        Item { }
+
+        Label {
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            text: qsTr("When pasted or imported text does not provide a Markdown heading, SmTool builds the idea header from the first sentence using this many words.")
+            color: palette.mid
         }
 
         Label {

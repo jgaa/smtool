@@ -222,6 +222,7 @@ struct DashboardEvaluation {
     std::vector<DashboardRow> balanceDeviation;
     std::vector<DashboardRow> alerts;
     std::vector<DashboardRow> recommendedFocus;
+    std::vector<DashboardRow> statistics;
 };
 
 } // namespace SmTool::Domain

@@ -92,10 +92,15 @@ int main(int argc, char *argv[])
                      &controller, [&appSettings, &controller]() {
         controller.setBatchMarkdownImportsEnabled(appSettings.batchMarkdownImports());
     });
-    controller.setDescriptionPreviewWordCap(appSettings.boardDescriptionPreviewWordCap());
-    QObject::connect(&appSettings, &SmTool::App::AppSettings::boardDescriptionPreviewWordCapChanged,
+    controller.setImportedIdeaTitleWordCap(appSettings.importedIdeaTitleWordCap());
+    QObject::connect(&appSettings, &SmTool::App::AppSettings::importedIdeaTitleWordCapChanged,
                      &controller, [&appSettings, &controller]() {
-        controller.setDescriptionPreviewWordCap(appSettings.boardDescriptionPreviewWordCap());
+        controller.setImportedIdeaTitleWordCap(appSettings.importedIdeaTitleWordCap());
+    });
+    controller.setDescriptionPreviewWordCap(appSettings.cardDescriptionWordCap());
+    QObject::connect(&appSettings, &SmTool::App::AppSettings::cardDescriptionWordCapChanged,
+                     &controller, [&appSettings, &controller]() {
+        controller.setDescriptionPreviewWordCap(appSettings.cardDescriptionWordCap());
     });
 
     LOG_INFO << "Starting SmTool";

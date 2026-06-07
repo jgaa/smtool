@@ -97,21 +97,53 @@ void AppSettings::setBatchMarkdownImports(bool enabled)
     emit batchMarkdownImportsChanged();
 }
 
-int AppSettings::boardDescriptionPreviewWordCap() const
+int AppSettings::importedIdeaTitleWordCap() const
 {
-    return normalizedBoardDescriptionPreviewWordCap(
-        QSettings{}.value(QStringLiteral("ui/boardDescriptionPreviewWordCap"), 10).toInt());
+    return normalizedImportedIdeaTitleWordCap(
+        QSettings{}.value(QStringLiteral("ui/importedIdeaTitleWordCap"), 8).toInt());
 }
 
-void AppSettings::setBoardDescriptionPreviewWordCap(int value)
+void AppSettings::setImportedIdeaTitleWordCap(int value)
 {
-    const auto normalized = normalizedBoardDescriptionPreviewWordCap(value);
-    if (boardDescriptionPreviewWordCap() == normalized) {
+    const auto normalized = normalizedImportedIdeaTitleWordCap(value);
+    if (importedIdeaTitleWordCap() == normalized) {
         return;
     }
 
-    saveValue(QStringLiteral("ui/boardDescriptionPreviewWordCap"), normalized);
-    emit boardDescriptionPreviewWordCapChanged();
+    saveValue(QStringLiteral("ui/importedIdeaTitleWordCap"), normalized);
+    emit importedIdeaTitleWordCapChanged();
+}
+
+int AppSettings::cardDescriptionWordCap() const
+{
+    return normalizedCardDescriptionWordCap(
+        QSettings{}.value(QStringLiteral("ui/cardDescriptionWordCap"), 100).toInt());
+}
+
+void AppSettings::setCardDescriptionWordCap(int value)
+{
+    const auto normalized = normalizedCardDescriptionWordCap(value);
+    if (cardDescriptionWordCap() == normalized) {
+        return;
+    }
+
+    saveValue(QStringLiteral("ui/cardDescriptionWordCap"), normalized);
+    emit cardDescriptionWordCapChanged();
+}
+
+bool AppSettings::cardDescriptionMarkdownEnabled() const
+{
+    return QSettings{}.value(QStringLiteral("ui/cardDescriptionMarkdownEnabled"), true).toBool();
+}
+
+void AppSettings::setCardDescriptionMarkdownEnabled(bool enabled)
+{
+    if (cardDescriptionMarkdownEnabled() == enabled) {
+        return;
+    }
+
+    saveValue(QStringLiteral("ui/cardDescriptionMarkdownEnabled"), enabled);
+    emit cardDescriptionMarkdownEnabledChanged();
 }
 
 QString AppSettings::effectiveDatabasePath(const QString &overridePath) const
@@ -232,8 +264,14 @@ void AppSettings::ensureDefaults() const
     if (!settings.contains(QStringLiteral("ui/batchMarkdownImports"))) {
         settings.setValue(QStringLiteral("ui/batchMarkdownImports"), true);
     }
-    if (!settings.contains(QStringLiteral("ui/boardDescriptionPreviewWordCap"))) {
-        settings.setValue(QStringLiteral("ui/boardDescriptionPreviewWordCap"), 10);
+    if (!settings.contains(QStringLiteral("ui/importedIdeaTitleWordCap"))) {
+        settings.setValue(QStringLiteral("ui/importedIdeaTitleWordCap"), 8);
+    }
+    if (!settings.contains(QStringLiteral("ui/cardDescriptionWordCap"))) {
+        settings.setValue(QStringLiteral("ui/cardDescriptionWordCap"), 100);
+    }
+    if (!settings.contains(QStringLiteral("ui/cardDescriptionMarkdownEnabled"))) {
+        settings.setValue(QStringLiteral("ui/cardDescriptionMarkdownEnabled"), true);
     }
     if (!settings.contains(QStringLiteral("ui/confirmContentDeletion"))) {
         settings.setValue(QStringLiteral("ui/confirmContentDeletion"), true);
@@ -266,9 +304,14 @@ int AppSettings::normalizedDefaultContentPriority(int value) const
     return std::clamp(value, 0, 100);
 }
 
-int AppSettings::normalizedBoardDescriptionPreviewWordCap(int value) const
+int AppSettings::normalizedImportedIdeaTitleWordCap(int value) const
 {
-    return std::clamp(value, 3, 30);
+    return std::clamp(value, 1, 30);
+}
+
+int AppSettings::normalizedCardDescriptionWordCap(int value) const
+{
+    return std::clamp(value, 0, 500);
 }
 
 } // namespace SmTool::App

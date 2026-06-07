@@ -100,7 +100,7 @@ QString markdownTopic(const QString &text)
     return {};
 }
 
-QString ideaTitleFromText(const QString &text)
+QString ideaTitleFromText(const QString &text, int wordCap)
 {
     const auto trimmed = text.trimmed();
     if (trimmed.isEmpty()) {
@@ -109,10 +109,10 @@ QString ideaTitleFromText(const QString &text)
 
     if (looksLikeMarkdown(trimmed)) {
         const auto title = markdownTopic(trimmed);
-        return title.isEmpty() ? clipToWords(firstSentence(trimmed), 5) : title;
+        return title.isEmpty() ? clipToWords(firstSentence(trimmed), wordCap) : title;
     }
 
-    return clipToWords(firstSentence(trimmed), 5);
+    return clipToWords(firstSentence(trimmed), wordCap);
 }
 
 bool isMarkdownFilePath(const QString &filePath)
@@ -289,6 +289,11 @@ void AppController::setBatchMarkdownImportsEnabled(bool enabled)
     batchMarkdownImportsEnabled_ = enabled;
 }
 
+void AppController::setImportedIdeaTitleWordCap(int value)
+{
+    importedIdeaTitleWordCap_ = std::clamp(value, 1, 30);
+}
+
 Models::ContentListModel *AppController::inboxModel() { return &inboxModel_; }
 Models::ContentStatusListModel *AppController::contentStatusModel() { return &contentStatusModel_; }
 Models::CalendarEntryModel *AppController::calendarModel() { return &calendarModel_; }
@@ -309,6 +314,7 @@ Models::DashboardRowModel *AppController::pipelineCoverageModel() { return &pipe
 Models::DashboardRowModel *AppController::balanceDeviationModel() { return &balanceDeviationModel_; }
 Models::DashboardRowModel *AppController::dashboardAlertsModel() { return &dashboardAlertsModel_; }
 Models::DashboardRowModel *AppController::recommendedFocusModel() { return &recommendedFocusModel_; }
+Models::DashboardRowModel *AppController::dashboardStatisticsModel() { return &dashboardStatisticsModel_; }
 
 bool AppController::boardShowArchived() const { return boardShowArchived_; }
 
@@ -762,7 +768,7 @@ bool AppController::createIdeaFromTextInternal(const QString &text, QString *err
         return false;
     }
 
-    const auto title = ideaTitleFromText(trimmed);
+    const auto title = ideaTitleFromText(trimmed, importedIdeaTitleWordCap_);
     if (title.isEmpty()) {
         if (errorMessage != nullptr) {
             *errorMessage = QStringLiteral("Could not derive an idea title.");
@@ -1972,6 +1978,7 @@ void AppController::refreshDashboard()
         balanceDeviationModel_.setItems({});
         dashboardAlertsModel_.setItems({});
         recommendedFocusModel_.setItems({});
+        dashboardStatisticsModel_.setItems({});
         return;
     }
 
@@ -1981,6 +1988,7 @@ void AppController::refreshDashboard()
     balanceDeviationModel_.setItems(evaluation.balanceDeviation);
     dashboardAlertsModel_.setItems(evaluation.alerts);
     recommendedFocusModel_.setItems(evaluation.recommendedFocus);
+    dashboardStatisticsModel_.setItems(evaluation.statistics);
 }
 
 void AppController::refreshClipboardHasText()

@@ -65,6 +65,7 @@ private slots:
     void createsIdeaFromPlainText();
     void createsIdeaFromMarkdown();
     void createsIdeaFromTextUsesConfiguredDefaultPriority();
+    void createsIdeaFromTextUsesConfiguredImportedHeaderWordCap();
     void importsIdeaFromPlainTextFile();
     void importsIdeasFromMarkdownFileSections();
     void importsMarkdownFileAsSingleIdeaWhenBatchDisabled();
@@ -714,7 +715,7 @@ void DatabaseTests::createsIdeaFromPlainText()
     QCOMPARE(controller.inboxModel()->rowCount(), 1);
     QCOMPARE(controller.inboxModel()->data(controller.inboxModel()->index(0, 0),
                                            SmTool::Models::ContentListModel::TitleRole).toString(),
-             QStringLiteral("Build a local-first workflow tool"));
+             QStringLiteral("Build a local-first workflow tool for content teams."));
 }
 
 void DatabaseTests::createsIdeaFromMarkdown()
@@ -751,6 +752,23 @@ void DatabaseTests::createsIdeaFromTextUsesConfiguredDefaultPriority()
              42);
 }
 
+void DatabaseTests::createsIdeaFromTextUsesConfiguredImportedHeaderWordCap()
+{
+    SmTool::App::AppController controller({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-controller-imported-header-words"),
+    });
+    controller.setImportedIdeaTitleWordCap(3);
+    QString errorMessage;
+    QVERIFY2(controller.initialize(&errorMessage), qPrintable(errorMessage));
+
+    QVERIFY(controller.createIdeaFromText(QStringLiteral("Priority should come from settings.")));
+    QCOMPARE(controller.inboxModel()->rowCount(), 1);
+    QCOMPARE(controller.inboxModel()->data(controller.inboxModel()->index(0, 0),
+                                           SmTool::Models::ContentListModel::TitleRole).toString(),
+             QStringLiteral("Priority should come"));
+}
+
 void DatabaseTests::importsIdeaFromPlainTextFile()
 {
     SmTool::App::AppController controller({
@@ -766,7 +784,7 @@ void DatabaseTests::importsIdeaFromPlainTextFile()
     QCOMPARE(controller.inboxModel()->rowCount(), 1);
     QCOMPARE(controller.inboxModel()->data(controller.inboxModel()->index(0, 0),
                                            SmTool::Models::ContentListModel::TitleRole).toString(),
-             QStringLiteral("Plain text import for inbox"));
+             QStringLiteral("Plain text import for inbox capture."));
 }
 
 void DatabaseTests::importsIdeasFromMarkdownFileSections()
@@ -1727,6 +1745,18 @@ void DatabaseTests::dashboardEvaluatesPerformanceAndPipeline()
     QVERIFY(techBalance != evaluation.balanceDeviation.end());
     QCOMPARE(techBalance->targetValue, 75.0);
     QCOMPARE(techBalance->actualValue, 66.7);
+
+    const auto publishedItemsStat = std::ranges::find_if(evaluation.statistics, [](const auto &row) {
+        return row.displayName == QStringLiteral("Published items");
+    });
+    QVERIFY(publishedItemsStat != evaluation.statistics.end());
+    QCOMPARE(publishedItemsStat->actualValue, 0.0);
+
+    const auto newItemsStat = std::ranges::find_if(evaluation.statistics, [](const auto &row) {
+        return row.displayName == QStringLiteral("New items last 7 days");
+    });
+    QVERIFY(newItemsStat != evaluation.statistics.end());
+    QCOMPARE(newItemsStat->actualValue, 3.0);
 }
 
 void DatabaseTests::dashboardUsesPublicationsForChannelGoalsAndSkipsDisabledGoals()
@@ -1853,6 +1883,18 @@ void DatabaseTests::dashboardUsesPublicationsForChannelGoalsAndSkipsDisabledGoal
     QVERIFY(youtubeBalance != evaluation.balanceDeviation.end());
     QCOMPARE(youtubeBalance->actualValue, 66.7);
     QCOMPARE(youtubeBalance->targetValue, 50.0);
+
+    const auto publishedItemsStat = std::ranges::find_if(evaluation.statistics, [](const auto &row) {
+        return row.displayName == QStringLiteral("Published items");
+    });
+    QVERIFY(publishedItemsStat != evaluation.statistics.end());
+    QCOMPARE(publishedItemsStat->actualValue, 3.0);
+
+    const auto recentPublicationsStat = std::ranges::find_if(evaluation.statistics, [](const auto &row) {
+        return row.displayName == QStringLiteral("Publications last 7 days");
+    });
+    QVERIFY(recentPublicationsStat != evaluation.statistics.end());
+    QCOMPARE(recentPublicationsStat->actualValue, 3.0);
 }
 
 QTEST_MAIN(DatabaseTests)

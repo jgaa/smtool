@@ -8,6 +8,8 @@ Rectangle {
     property string titleText: ""
     property string bodyText: ""
     property string metaText: ""
+    property int bodyWordCap: 100
+    property bool markdownEnabled: true
     property bool selected: false
     property bool showEditAction: true
     property bool showDeleteAction: true
@@ -16,6 +18,19 @@ Rectangle {
     signal clicked()
     signal editRequested()
     signal deleteRequested()
+
+    function clippedBodyText() {
+        const source = bodyText.trim()
+        if (source.length === 0 || bodyWordCap === 0) {
+            return source
+        }
+
+        const words = source.split(/\s+/).filter(function(word) { return word.length > 0 })
+        if (words.length <= bodyWordCap) {
+            return source
+        }
+        return words.slice(0, bodyWordCap).join(" ") + "..."
+    }
 
     radius: 6
     color: selected ? "#e8f2ff" : "white"
@@ -65,9 +80,9 @@ Rectangle {
         }
 
         Label {
-            text: root.bodyText
+            text: root.clippedBodyText()
             visible: text.length > 0
-            textFormat: Text.MarkdownText
+            textFormat: root.markdownEnabled ? Text.MarkdownText : Text.PlainText
             wrapMode: Text.Wrap
             Layout.fillWidth: true
         }

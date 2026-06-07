@@ -49,6 +49,7 @@ class AppController : public QObject
     Q_PROPERTY(SmTool::Models::DashboardRowModel *balanceDeviationModel READ balanceDeviationModel CONSTANT)
     Q_PROPERTY(SmTool::Models::DashboardRowModel *dashboardAlertsModel READ dashboardAlertsModel CONSTANT)
     Q_PROPERTY(SmTool::Models::DashboardRowModel *recommendedFocusModel READ recommendedFocusModel CONSTANT)
+    Q_PROPERTY(SmTool::Models::DashboardRowModel *dashboardStatisticsModel READ dashboardStatisticsModel CONSTANT)
     Q_PROPERTY(bool boardShowArchived READ boardShowArchived WRITE setBoardShowArchived NOTIFY boardShowArchivedChanged)
     Q_PROPERTY(bool allContentShowArchived READ allContentShowArchived WRITE setAllContentShowArchived NOTIFY allContentShowArchivedChanged)
     Q_PROPERTY(bool calendarIncludeArchived READ calendarIncludeArchived WRITE setCalendarIncludeArchived NOTIFY calendarIncludeArchivedChanged)
@@ -76,6 +77,7 @@ public:
     bool initialize(QString *errorMessage = nullptr);
     void setDefaultContentPriority(int value);
     void setBatchMarkdownImportsEnabled(bool enabled);
+    void setImportedIdeaTitleWordCap(int value);
     void setDescriptionPreviewWordCap(int value);
 
     [[nodiscard]] Models::ContentListModel *inboxModel();
@@ -98,6 +100,7 @@ public:
     [[nodiscard]] Models::DashboardRowModel *balanceDeviationModel();
     [[nodiscard]] Models::DashboardRowModel *dashboardAlertsModel();
     [[nodiscard]] Models::DashboardRowModel *recommendedFocusModel();
+    [[nodiscard]] Models::DashboardRowModel *dashboardStatisticsModel();
 
     [[nodiscard]] bool boardShowArchived() const;
     void setBoardShowArchived(bool enabled);
@@ -297,6 +300,7 @@ private:
     Models::DashboardRowModel balanceDeviationModel_;
     Models::DashboardRowModel dashboardAlertsModel_;
     Models::DashboardRowModel recommendedFocusModel_;
+    Models::DashboardRowModel dashboardStatisticsModel_;
 
     bool boardShowArchived_ = false;
     bool allContentShowArchived_ = false;
@@ -311,6 +315,7 @@ private:
     QString statusMessage_;
     int defaultContentPriority_ = 5;
     bool batchMarkdownImportsEnabled_ = true;
+    int importedIdeaTitleWordCap_ = 8;
     int descriptionPreviewWordCap_ = 20;
     Data::ContentRepository::SortMode allContentSortMode_ = Data::ContentRepository::SortMode::DueDateAlphabetical;
     std::map<QString, std::unique_ptr<Models::ContentListModel>> boardModels_;

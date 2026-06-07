@@ -81,6 +81,20 @@ ApplicationWindow {
     property bool activeHasSelection: activeSelectedText.length > 0
     property var calendarSections: []
 
+    function clippedCardDescription(text) {
+        const source = text.trim()
+        const wordCap = appSettings.cardDescriptionWordCap
+        if (source.length === 0 || wordCap === 0) {
+            return source
+        }
+
+        const words = source.split(/\s+/).filter(function(word) { return word.length > 0 })
+        if (words.length <= wordCap) {
+            return source
+        }
+        return words.slice(0, wordCap).join(" ") + "..."
+    }
+
     function copyCurrentSelection() {
         const item = window.activeFocusItem
         if (!item || !window.activeHasSelection) {
@@ -1881,6 +1895,8 @@ ApplicationWindow {
                             width: ListView.view.width
                             titleText: title
                             bodyText: description
+                            bodyWordCap: appSettings.cardDescriptionWordCap
+                            markdownEnabled: appSettings.cardDescriptionMarkdownEnabled
                             metaText: [pillar, kind, "Pri " + priority, series, suggestedChannel].filter(function(value) { return value.length > 0 }).join(" | ")
                             onEditRequested: quickAddDialog.openForEdit(itemId)
                             onDeleteRequested: deleteContentDialog.openForContent(itemId, title)
@@ -2483,9 +2499,9 @@ ApplicationWindow {
                                         }
 
                                         Label {
-                                            text: description
                                             visible: text.length > 0
-                                            textFormat: Text.MarkdownText
+                                            text: window.clippedCardDescription(description)
+                                            textFormat: appSettings.cardDescriptionMarkdownEnabled ? Text.MarkdownText : Text.PlainText
                                             wrapMode: Text.Wrap
                                         }
                                     }
@@ -2641,11 +2657,9 @@ ApplicationWindow {
                                                 Label {
                                                     Layout.fillWidth: true
                                                     visible: description.length > 0
-                                                    text: description
-                                                    textFormat: Text.MarkdownText
+                                                    text: window.clippedCardDescription(description)
+                                                    textFormat: appSettings.cardDescriptionMarkdownEnabled ? Text.MarkdownText : Text.PlainText
                                                     wrapMode: Text.Wrap
-                                                    maximumLineCount: 3
-                                                    elide: Text.ElideRight
                                                 }
 
                                                 Label {
@@ -2785,6 +2799,8 @@ ApplicationWindow {
                             width: ListView.view.width
                             titleText: title
                             bodyText: description
+                            bodyWordCap: appSettings.cardDescriptionWordCap
+                            markdownEnabled: appSettings.cardDescriptionMarkdownEnabled
                             metaText: [pillar, kind, "Pri " + priority, status, series, suggestedChannel].filter(function(value) { return value.length > 0 }).join(" | ")
                             onEditRequested: quickAddDialog.openForEdit(itemId)
                             onDeleteRequested: deleteContentDialog.openForContent(itemId, title)
