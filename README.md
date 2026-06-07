@@ -80,9 +80,9 @@ The design goal is to minimize friction and context switching while maximizing i
 
 ## Current Status
 
-Under initial development
+The desktop app is ready in it's initial version.
 
-The primary goal is to explore content workflows and gather experience before integrating similar capabilities into larger productivity systems.
+The mobile companion app is under development.
 
 ## Technology
 
