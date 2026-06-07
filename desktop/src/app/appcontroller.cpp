@@ -831,6 +831,27 @@ QVariantMap AppController::contentDetails(const QString &contentId) const
     };
 }
 
+QVariantList AppController::contentSeriesOptions() const
+{
+    QVariantList options;
+    options.push_back(QVariantMap{
+        {QStringLiteral("lookupId"), QString{}},
+        {QStringLiteral("displayName"), QStringLiteral("None")},
+    });
+
+    if (!lookupsRepository_) {
+        return options;
+    }
+
+    for (const auto &item : lookupsRepository_->series(false)) {
+        options.push_back(QVariantMap{
+            {QStringLiteral("lookupId"), item.id},
+            {QStringLiteral("displayName"), item.displayName},
+        });
+    }
+    return options;
+}
+
 QVariantMap AppController::publicationDetails(const QString &publicationId) const
 {
     if (!publicationRepository_) {

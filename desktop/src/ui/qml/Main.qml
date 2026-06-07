@@ -344,6 +344,7 @@ ApplicationWindow {
         closePolicy: Popup.NoAutoClose
         property string editingContentId: ""
         property string presetSeriesId: ""
+        property var seriesOptionsModel: []
         property var publicationsModel: []
         property var mediaItems: []
         title: editingContentId.length > 0 ? qsTr("Edit Content") : qsTr("Quick Add")
@@ -359,6 +360,7 @@ ApplicationWindow {
             inboxDescriptionField.clear()
             inboxTagsField.clear()
             presetSeriesId = ""
+            seriesOptionsModel = appController.contentSeriesOptions()
             priorityBox.value = appSettings.defaultContentPriority
             scheduledAtSelector.value = ""
             if (statusBox.count > 0) {
@@ -373,7 +375,7 @@ ApplicationWindow {
             if (channelBox.count > 0) {
                 channelBox.currentIndex = 0
             }
-            seriesBox.currentIndex = -1
+            seriesBox.currentIndex = 0
         }
 
         function reloadPublications() {
@@ -413,6 +415,7 @@ ApplicationWindow {
                 return
             }
 
+            seriesOptionsModel = appController.contentSeriesOptions()
             editingContentId = item.id
             inboxTitleField.text = item.title
             inboxDescriptionField.text = item.description
@@ -538,10 +541,10 @@ ApplicationWindow {
                                 ComboBox {
                                     id: seriesBox
                                     Layout.fillWidth: true
-                                    model: appController.contentSeriesModel
+                                    model: quickAddDialog.seriesOptionsModel
                                     textRole: "displayName"
                                     valueRole: "lookupId"
-                                    currentIndex: -1
+                                    currentIndex: 0
                                 }
 
                                 Label { text: "Ch" }

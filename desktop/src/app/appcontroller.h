@@ -164,6 +164,7 @@ public:
     Q_INVOKABLE void logDebug(const QString &message) const;
     Q_INVOKABLE QObject *boardModelForStatus(const QString &statusId) const;
     Q_INVOKABLE QVariantMap contentDetails(const QString &contentId) const;
+    Q_INVOKABLE QVariantList contentSeriesOptions() const;
     Q_INVOKABLE QVariantMap publicationDetails(const QString &publicationId) const;
     Q_INVOKABLE QVariantMap goalDetails(const QString &goalId) const;
     Q_INVOKABLE QVariantList goalScopeOptions(const QString &scopeType) const;
