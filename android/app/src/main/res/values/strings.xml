@@ -1,0 +1,85 @@
+<resources>
+    <string name="app_name">smtool Talk</string>
+    <string name="action_settings">Settings</string>
+    <!-- Strings used for fragments for navigation -->
+    <string name="first_fragment_label">Ideas</string>
+    <string name="next">Next</string>
+    <string name="previous">Previous</string>
+    <string name="pref_transcribe_immediately">Transcribe immediately</string>
+    <string name="pref_keep_audio">Keep audio files</string>
+    <string name="recording">Recording...</string>
+    <string name="paused">Paused</string>
+    <string name="pause">Pause</string>
+    <string name="resume">Resume</string>
+    <string name="done">Done</string>
+    <string name="cancel">Cancel</string>
+    <string name="settings">Settings</string>
+    <string name="pref_title_words">Title word limit</string>
+    <string name="pref_language">Language</string>
+    <string name="transcribe_all">Transcribe all</string>
+
+    <string-array name="languages">
+        <item>Auto-detect (auto)</item>
+        <item>Arabic (ar)</item>
+        <item>Chinese (zh)</item>
+        <item>Danish (da)</item>
+        <item>Dutch (nl)</item>
+        <item>English (en)</item>
+        <item>Finnish (fi)</item>
+        <item>French (fr)</item>
+        <item>German (de)</item>
+        <item>Greek (el)</item>
+        <item>Hindi (hi)</item>
+        <item>Hungarian (hu)</item>
+        <item>Indonesian (id)</item>
+        <item>Italian (it)</item>
+        <item>Japanese (ja)</item>
+        <item>Korean (ko)</item>
+        <item>Norwegian (no)</item>
+        <item>Polish (pl)</item>
+        <item>Portuguese (pt)</item>
+        <item>Romanian (ro)</item>
+        <item>Russian (ru)</item>
+        <item>Spanish (es)</item>
+        <item>Swedish (sv)</item>
+        <item>Turkish (tr)</item>
+        <item>Ukrainian (uk)</item>
+        <item>Vietnamese (vi)</item>
+    </string-array>
+
+    <string-array name="language_codes">
+        <item>auto</item>
+        <item>ar</item>
+        <item>zh</item>
+        <item>da</item>
+        <item>nl</item>
+        <item>en</item>
+        <item>fi</item>
+        <item>fr</item>
+        <item>de</item>
+        <item>el</item>
+        <item>hi</item>
+        <item>hu</item>
+        <item>id</item>
+        <item>it</item>
+        <item>ja</item>
+        <item>ko</item>
+        <item>no</item>
+        <item>pl</item>
+        <item>pt</item>
+        <item>ro</item>
+        <item>ru</item>
+        <item>es</item>
+        <item>sv</item>
+        <item>tr</item>
+        <item>uk</item>
+        <item>vi</item>
+    </string-array>
+    <string name="share_all">Share all</string>
+    <string name="export_format">Choose export format</string>
+    <string name="format_json">JSON</string>
+    <string name="format_markdown">Markdown</string>
+    <string name="delete_all">Delete all ideas</string>
+    <string name="delete_all_confirmation">Are you sure you want to delete all ideas? This action cannot be undone.</string>
+    <string name="transcribing_ideas">Transcribing ideas...</string>
+</resources>
