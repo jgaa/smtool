@@ -27,6 +27,7 @@ class WhisperContext private constructor(private var ptr: Long) {
     suspend fun transcribeData(
         data: FloatArray,
         language: String,
+        initialPrompt: String? = null,
         printTimestamp: Boolean = true,
         callback: WhisperCallback
     ): String = withContext(scope.coroutineContext) {
@@ -36,7 +37,7 @@ class WhisperContext private constructor(private var ptr: Long) {
             val numThreads = WhisperCpuConfig.preferredThreadCount
             Log.d(LOG_TAG, "Selecting $numThreads threads")
 
-            WhisperLib.fullTranscribe(ptr, numThreads, data, language, callback)
+            WhisperLib.fullTranscribe(ptr, numThreads, data, language, initialPrompt, callback)
 
             val textCount = WhisperLib.getTextSegmentCount(ptr)
             return@withContext buildString {
@@ -164,6 +165,7 @@ private class WhisperLib {
             numThreads: Int,
             audioData: FloatArray,
             language: String,
+            initialPrompt: String?,
             callback: WhisperCallback
         )
 

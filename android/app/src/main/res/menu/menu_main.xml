@@ -13,6 +13,12 @@
         android:title="@string/share_all"
         app:showAsAction="never" />
     <item
+        android:id="@+id/action_share_selected"
+        android:orderInCategory="96"
+        android:title="@string/share_selected"
+        android:visible="false"
+        app:showAsAction="ifRoom" />
+    <item
         android:id="@+id/action_delete_all"
         android:orderInCategory="110"
         android:title="@string/delete_all"

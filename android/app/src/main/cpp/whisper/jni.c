@@ -84,7 +84,7 @@ void inputStreamClose(void * ctx) {
 }
 
 JNIEXPORT jlong JNICALL
-Java_com_whispercppdemo_whisper_WhisperLib_00024Companion_initContextFromInputStream(
+Java_com_whispercpp_whisper_WhisperLib_00024Companion_initContextFromInputStream(
         JNIEnv *env, jobject thiz, jobject input_stream) {
     UNUSED(thiz);
 
@@ -234,7 +234,7 @@ Java_com_whispercpp_whisper_WhisperLib_00024Companion_stopTranscription(JNIEnv* 
 JNIEXPORT void JNICALL
 Java_com_whispercpp_whisper_WhisperLib_00024Companion_fullTranscribe(
         JNIEnv *env, jobject thiz, jlong context_ptr, jint num_threads,
-        jfloatArray audio_data, jstring language, jobject callback) {
+        jfloatArray audio_data, jstring language, jstring initial_prompt, jobject callback) {
     UNUSED(thiz);
 // Reset abort state
     Java_com_whispercpp_whisper_WhisperLib_00024Companion_resetAbort(env, thiz);
@@ -288,6 +288,12 @@ Java_com_whispercpp_whisper_WhisperLib_00024Companion_fullTranscribe(
         language_str = (*env)->GetStringUTFChars(env, language, NULL);
     }
 
+    // Get initial prompt parameter
+    const char *initial_prompt_str = NULL;
+    if (initial_prompt != NULL) {
+        initial_prompt_str = (*env)->GetStringUTFChars(env, initial_prompt, NULL);
+    }
+
     // Configure whisper parameters with callbacks
     struct whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
     params.print_realtime = false; // We handle callbacks ourselves
@@ -300,6 +306,7 @@ Java_com_whispercpp_whisper_WhisperLib_00024Companion_fullTranscribe(
     params.offset_ms = 0;
     params.no_context = true;
     params.single_segment = false;
+    params.initial_prompt = initial_prompt_str;
 
     // Set our callbacks
     params.new_segment_callback = new_segment_callback;
@@ -318,6 +325,11 @@ Java_com_whispercpp_whisper_WhisperLib_00024Companion_fullTranscribe(
     // Cleanup language string if we allocated it
     if (language != NULL) {
         (*env)->ReleaseStringUTFChars(env, language, language_str);
+    }
+
+    // Cleanup initial prompt string if we allocated it
+    if (initial_prompt != NULL) {
+        (*env)->ReleaseStringUTFChars(env, initial_prompt, initial_prompt_str);
     }
 
     // Notify completion

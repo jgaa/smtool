@@ -62,6 +62,13 @@ class MainActivity : AppCompatActivity() {
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         // Inflate the menu; this adds items to the action bar if it is present.
         menuInflater.inflate(R.menu.menu_main, menu)
+        
+        val navHostFragment =
+            supportFragmentManager.findFragmentById(R.id.nav_host_fragment_content_main) as NavHostFragment
+        val firstFragment = navHostFragment.childFragmentManager.fragments.firstOrNull { it is FirstFragment } as? FirstFragment
+        val hasSelection = firstFragment?.getSelectedIds()?.isNotEmpty() ?: false
+        menu.findItem(R.id.action_share_selected)?.isVisible = hasSelection
+        
         return true
     }
 
@@ -78,7 +85,17 @@ class MainActivity : AppCompatActivity() {
                 true
             }
             R.id.action_share_all -> {
-                showExportFormatDialog()
+                showExportFormatDialog(null)
+                true
+            }
+            R.id.action_share_selected -> {
+                val navHostFragment =
+                    supportFragmentManager.findFragmentById(R.id.nav_host_fragment_content_main) as NavHostFragment
+                val firstFragment = navHostFragment.childFragmentManager.fragments.firstOrNull { it is FirstFragment } as? FirstFragment
+                val selectedIds = firstFragment?.getSelectedIds()
+                if (!selectedIds.isNullOrEmpty()) {
+                    showExportFormatDialog(selectedIds)
+                }
                 true
             }
             R.id.action_delete_all -> {
@@ -99,16 +116,19 @@ class MainActivity : AppCompatActivity() {
         val currentKeepAudio = prefs.getBoolean("keep_audio", false)
         val currentLanguage = prefs.getString("language", "en") ?: "en"
         val currentWords = prefs.getInt("title_word_limit", 6)
+        val currentPrompt = prefs.getString("whisper_prompt", "") ?: ""
         
         val dialogView = layoutInflater.inflate(R.layout.dialog_settings, null)
         val checkTranscribe = dialogView.findViewById<CheckBox>(R.id.check_transcribe_immediately)
         val checkKeepAudio = dialogView.findViewById<CheckBox>(R.id.check_keep_audio)
         val spinnerLanguage = dialogView.findViewById<Spinner>(R.id.spinner_language)
         val editWords = dialogView.findViewById<EditText>(R.id.edit_title_word_limit)
+        val editPrompt = dialogView.findViewById<EditText>(R.id.edit_whisper_prompt)
         
         checkTranscribe.isChecked = currentTranscribe
         checkKeepAudio.isChecked = currentKeepAudio
         editWords.setText(currentWords.toString())
+        editPrompt.setText(currentPrompt)
 
         val adapter = ArrayAdapter.createFromResource(
             this, R.array.languages, android.R.layout.simple_spinner_item
@@ -125,12 +145,14 @@ class MainActivity : AppCompatActivity() {
             .setView(dialogView)
             .setPositiveButton(android.R.string.ok) { _, _ ->
                 val words = editWords.text.toString().toIntOrNull() ?: 6
+                val prompt = editPrompt.text.toString()
                 val selectedLang = languageCodes[spinnerLanguage.selectedItemPosition]
                 prefs.edit {
                     putBoolean("transcribe_immediately", checkTranscribe.isChecked)
                     putBoolean("keep_audio", checkKeepAudio.isChecked)
                     putString("language", selectedLang)
                     putInt("title_word_limit", words)
+                    putString("whisper_prompt", prompt)
                 }
             }
             .setNegativeButton(android.R.string.cancel, null)
@@ -141,21 +163,27 @@ class MainActivity : AppCompatActivity() {
         JSON, MARKDOWN
     }
 
-    private fun showExportFormatDialog() {
+    private fun showExportFormatDialog(filterIds: List<Long>? = null) {
         val options = arrayOf(getString(R.string.format_json), getString(R.string.format_markdown))
         AlertDialog.Builder(this)
             .setTitle(R.string.export_format)
             .setItems(options) { _, which ->
                 val format = if (which == 0) ExportFormat.JSON else ExportFormat.MARKDOWN
-                shareAllTranscripts(format)
+                shareTranscripts(format, filterIds)
             }
             .show()
     }
 
-    private fun shareAllTranscripts(format: ExportFormat = ExportFormat.JSON) {
+    private fun shareTranscripts(format: ExportFormat = ExportFormat.JSON, filterIds: List<Long>? = null) {
         val dbHelper = DatabaseHelper(this)
         lifecycleScope.launch(Dispatchers.IO) {
-            val ideas = dbHelper.getAllIdeas()
+            var ideas = dbHelper.getAllIdeas()
+            if (filterIds != null) {
+                ideas = ideas.filter { filterIds.contains(it.id) }
+            }
+            
+            if (ideas.isEmpty()) return@launch
+
             val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
 
             val (fileName, mimeType, content) = when (format) {
@@ -168,7 +196,8 @@ class MainActivity : AppCompatActivity() {
                         jsonObject.put("date", sdf.format(Date(idea.createdAt)))
                         jsonArray.put(jsonObject)
                     }
-                    Triple("all_ideas.json", "application/json", jsonArray.toString(2))
+                    val name = if (filterIds == null) "all_ideas.json" else "selected_ideas.json"
+                    Triple(name, "application/json", jsonArray.toString(2))
                 }
                 ExportFormat.MARKDOWN -> {
                     val sb = StringBuilder()
@@ -180,7 +209,8 @@ class MainActivity : AppCompatActivity() {
                             sb.append("\n---\n\n")
                         }
                     }
-                    Triple("all_ideas.md", "text/markdown", sb.toString())
+                    val name = if (filterIds == null) "all_ideas.md" else "selected_ideas.md"
+                    Triple(name, "text/markdown", sb.toString())
                 }
             }
 
@@ -198,13 +228,18 @@ class MainActivity : AppCompatActivity() {
                     type = mimeType
                     putExtra(android.content.Intent.EXTRA_STREAM, contentUri)
                     putExtra(android.content.Intent.EXTRA_SUBJECT, "SMtool Ideas Export")
-                    putExtra(android.content.Intent.EXTRA_TITLE, getString(R.string.share_all))
+                    putExtra(android.content.Intent.EXTRA_TITLE, if (filterIds == null) getString(R.string.share_all) else getString(R.string.share_selected))
                     clipData = android.content.ClipData.newRawUri(null, contentUri)
                     addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
-                startActivity(android.content.Intent.createChooser(shareIntent, getString(R.string.share_all)))
+                val title = if (filterIds == null) getString(R.string.share_all) else getString(R.string.share_selected)
+                startActivity(android.content.Intent.createChooser(shareIntent, title))
             }
         }
+    }
+
+    fun updateSelectionState(hasSelection: Boolean) {
+        invalidateOptionsMenu()
     }
 
     private fun showDeleteAllConfirmation() {

@@ -76,10 +76,14 @@
         <item>vi</item>
     </string-array>
     <string name="share_all">Share all</string>
+    <string name="share_selected">Share selected</string>
+    <string name="selected">Selected</string>
     <string name="export_format">Choose export format</string>
     <string name="format_json">JSON</string>
     <string name="format_markdown">Markdown</string>
     <string name="delete_all">Delete all ideas</string>
     <string name="delete_all_confirmation">Are you sure you want to delete all ideas? This action cannot be undone.</string>
     <string name="transcribing_ideas">Transcribing ideas...</string>
+    <string name="pref_whisper_prompt">Whisper Context/Prompt</string>
+    <string name="pref_whisper_prompt_hint">Enter words or phrases, one per line</string>
 </resources>

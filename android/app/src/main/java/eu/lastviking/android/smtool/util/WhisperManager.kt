@@ -57,8 +57,12 @@ class WhisperManager(private val context: Context) {
     suspend fun transcribe(audioFile: File, lang: String = "en"): String? = withContext(Dispatchers.Default) {
         if (!isModelAvailable()) return@withContext "Model not downloaded"
 
+        val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+        val prompt = prefs.getString("whisper_prompt", "")?.replace("\n", " ")?.trim()
+        val finalPrompt = if (prompt.isNullOrEmpty()) null else prompt
+
         val finalLang = if (lang == "auto") "" else lang
-        Log.d(TAG, "Starting transcription for file: ${audioFile.name}, requested language: '$finalLang'")
+        Log.d(TAG, "Starting transcription for file: ${audioFile.name}, requested language: '$finalLang', prompt: '$finalPrompt'")
 
         try {
             if (whisperContext == null) {
@@ -71,7 +75,7 @@ class WhisperManager(private val context: Context) {
 
             for (chunk in chunks) {
                 val data = chunker.readChunkData(chunk)
-                val result = whisperContext?.transcribeData(data, finalLang, false, object : WhisperCallback {
+                val result = whisperContext?.transcribeData(data, finalLang, finalPrompt, false, object : WhisperCallback {
                     override fun onNewSegment(startMs: Long, endMs: Long, text: String) {
                         Log.d(TAG, "Segment: $text")
                     }

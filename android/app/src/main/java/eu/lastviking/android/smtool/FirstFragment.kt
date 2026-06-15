@@ -63,10 +63,12 @@ class FirstFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        adapter = IdeaAdapter(emptyList()) { idea ->
+        adapter = IdeaAdapter(emptyList(), { idea ->
             val bundle = Bundle().apply { putLong("ideaId", idea.id) }
             findNavController().navigate(R.id.action_FirstFragment_to_EditIdeaFragment, bundle)
-        }
+        }, { hasSelection ->
+            (requireActivity() as? MainActivity)?.updateSelectionState(hasSelection)
+        })
         binding.recyclerIdeas.adapter = adapter
 
         binding.fabAddIdea.setOnClickListener {
@@ -75,6 +77,10 @@ class FirstFragment : Fragment() {
 
         refreshIdeas()
         checkModel()
+    }
+
+    fun getSelectedIds(): List<Long> {
+        return if (::adapter.isInitialized) adapter.getSelectedIds() else emptyList()
     }
 
     private fun refreshIdeas() {
