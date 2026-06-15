@@ -22,6 +22,35 @@ inline constexpr auto publicationStatuses = std::array{
     "published"_L1,
 };
 
+inline constexpr auto goalTypes = std::array{
+    "count"_L1,
+    "cadence"_L1,
+    "balance"_L1,
+};
+
+inline constexpr auto goalScopeTypes = std::array{
+    "pillar"_L1,
+    "tag"_L1,
+    "channel"_L1,
+    "series"_L1,
+    "kind"_L1,
+};
+
+inline constexpr auto goalPeriodTypes = std::array{
+    "day"_L1,
+    "week"_L1,
+    "month"_L1,
+    "quarter"_L1,
+    "year"_L1,
+    "rolling_days"_L1,
+};
+
+inline constexpr auto goalMetricTypes = std::array{
+    "content_count"_L1,
+    "publication_count"_L1,
+    "balance_weight"_L1,
+};
+
 inline constexpr auto seededPillars = std::array{
     "product"_L1,
     "tech"_L1,
@@ -81,6 +110,26 @@ inline bool isValidSeriesStatus(const QAnyStringView value)
 inline bool isValidPublicationStatus(const QAnyStringView value)
 {
     return indexOf(publicationStatuses, value).has_value();
+}
+
+inline bool isValidGoalType(const QAnyStringView value)
+{
+    return indexOf(goalTypes, value).has_value();
+}
+
+inline bool isValidGoalScopeType(const QAnyStringView value)
+{
+    return indexOf(goalScopeTypes, value).has_value();
+}
+
+inline bool isValidGoalPeriodType(const QAnyStringView value)
+{
+    return indexOf(goalPeriodTypes, value).has_value();
+}
+
+inline bool isValidGoalMetricType(const QAnyStringView value)
+{
+    return indexOf(goalMetricTypes, value).has_value();
 }
 
 inline QString titleFromKey(const QAnyStringView key)

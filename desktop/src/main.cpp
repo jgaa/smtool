@@ -82,10 +82,25 @@ int main(int argc, char *argv[])
         LOG_ERROR << "Failed to initialize SmTool: " << errorMessage.toStdString();
         return 1;
     }
-    controller.setDescriptionPreviewWordCap(appSettings.boardDescriptionPreviewWordCap());
-    QObject::connect(&appSettings, &SmTool::App::AppSettings::boardDescriptionPreviewWordCapChanged,
+    controller.setDefaultContentPriority(appSettings.defaultContentPriority());
+    QObject::connect(&appSettings, &SmTool::App::AppSettings::defaultContentPriorityChanged,
                      &controller, [&appSettings, &controller]() {
-        controller.setDescriptionPreviewWordCap(appSettings.boardDescriptionPreviewWordCap());
+        controller.setDefaultContentPriority(appSettings.defaultContentPriority());
+    });
+    controller.setBatchMarkdownImportsEnabled(appSettings.batchMarkdownImports());
+    QObject::connect(&appSettings, &SmTool::App::AppSettings::batchMarkdownImportsChanged,
+                     &controller, [&appSettings, &controller]() {
+        controller.setBatchMarkdownImportsEnabled(appSettings.batchMarkdownImports());
+    });
+    controller.setImportedIdeaTitleWordCap(appSettings.importedIdeaTitleWordCap());
+    QObject::connect(&appSettings, &SmTool::App::AppSettings::importedIdeaTitleWordCapChanged,
+                     &controller, [&appSettings, &controller]() {
+        controller.setImportedIdeaTitleWordCap(appSettings.importedIdeaTitleWordCap());
+    });
+    controller.setDescriptionPreviewWordCap(appSettings.cardDescriptionWordCap());
+    QObject::connect(&appSettings, &SmTool::App::AppSettings::cardDescriptionWordCapChanged,
+                     &controller, [&appSettings, &controller]() {
+        controller.setDescriptionPreviewWordCap(appSettings.cardDescriptionWordCap());
     });
 
     LOG_INFO << "Starting SmTool";

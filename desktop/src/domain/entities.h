@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QDate>
 #include <QDateTime>
 #include <QString>
 
@@ -29,6 +30,7 @@ struct BurstTemplate {
     QString titleSuffix;
     QString kindId;
     QString suggestedChannelId;
+    QString suggestedChannelName;
     QString outcomeId;
     bool isActive = true;
 };
@@ -43,10 +45,25 @@ struct Series {
     QDateTime updatedAt;
 };
 
+struct SeriesDetail {
+    QString id;
+    QString name;
+    QString description;
+    QString pillarId;
+    QString pillarName;
+    QString status;
+    int contentCount = 0;
+    int scheduledCount = 0;
+    QDateTime createdAt;
+    QDateTime updatedAt;
+};
+
 struct ContentItem {
     QString id;
     QString parentId;
     QString seriesId;
+    int seriesPosition = 0;
+    bool hasSeriesPosition = false;
     QString burstTemplateKey;
     QString title;
     QString description;
@@ -78,8 +95,11 @@ struct ContentSummary {
     QString suggestedChannelName;
     QString status;
     int priority = 0;
+    int seriesPosition = 0;
+    bool hasSeriesPosition = false;
     QDateTime scheduledAt;
     QDateTime publishedAt;
+    QDateTime firstPublicationAt;
 };
 
 struct Publication {
@@ -91,6 +111,17 @@ struct Publication {
     QDateTime scheduledAt;
     QDateTime publishedAt;
     QString url;
+    QDateTime createdAt;
+    QDateTime updatedAt;
+};
+
+struct MediaItem {
+    QString id;
+    QString contentId;
+    QString publicationId;
+    QString name;
+    QString sourceType;
+    QString location;
     QDateTime createdAt;
     QDateTime updatedAt;
 };
@@ -118,20 +149,80 @@ struct CalendarEntry {
     bool isOverdue = false;
 };
 
-struct DashboardMetric {
-    QString label;
-    int value = 0;
-    QString secondary;
+enum class DashboardHealth {
+    Good,
+    SlightlyLow,
+    Warning,
+    Bad,
+    Critical,
+    TooHigh,
+    Unknown,
 };
 
-struct DashboardData {
-    std::vector<DashboardMetric> byPillar;
-    std::vector<DashboardMetric> bySeries;
-    std::vector<DashboardMetric> byStatus;
-    std::vector<DashboardMetric> upcoming;
-    std::vector<DashboardMetric> publishedContent;
-    std::vector<DashboardMetric> publishedPublications;
-    std::vector<DashboardMetric> zeroPublishedPillars;
+struct Goal {
+    QString id;
+    QString name;
+    QString goalType;
+    QString scopeType;
+    QString scopeId;
+    QString scopeDisplayName;
+    QString metricType;
+    int targetValue = 0;
+    QString periodType;
+    int periodValue = 0;
+    bool enabled = true;
+    QString summaryText;
+    QDateTime createdAt;
+    QDateTime updatedAt;
+};
+
+struct GoalBalanceItem {
+    QString id;
+    QString goalId;
+    QString scopeType;
+    QString scopeId;
+    QString scopeDisplayName;
+    int weight = 0;
+    int sortOrder = 0;
+};
+
+struct DashboardPeriod {
+    QString key;
+    QString label;
+    QDate startDate;
+    QDate endDate;
+};
+
+struct DashboardRow {
+    QString goalId;
+    QString goalName;
+    QString goalType;
+    QString scopeType;
+    QString metricType;
+    QString displayName;
+    QString summaryText;
+    QString detailText;
+    double targetValue = 0.0;
+    double actualValue = 0.0;
+    double percent = 0.0;
+    double deviation = 0.0;
+    double absoluteDeviation = 0.0;
+    double requiredValue = 0.0;
+    double pipelineValue = 0.0;
+    double shortfallValue = 0.0;
+    double severityScore = 0.0;
+    DashboardHealth health = DashboardHealth::Unknown;
+};
+
+struct DashboardEvaluation {
+    DashboardPeriod performancePeriod;
+    DashboardPeriod pipelinePeriod;
+    std::vector<DashboardRow> goalAchievement;
+    std::vector<DashboardRow> pipelineCoverage;
+    std::vector<DashboardRow> balanceDeviation;
+    std::vector<DashboardRow> alerts;
+    std::vector<DashboardRow> recommendedFocus;
+    std::vector<DashboardRow> statistics;
 };
 
 } // namespace SmTool::Domain

@@ -117,6 +117,21 @@ CREATE TABLE publication (
     updated_at DATETIME NOT NULL
 );
 
+CREATE TABLE media (
+    id TEXT PRIMARY KEY,
+    content_id TEXT NULL REFERENCES content(id) ON DELETE CASCADE,
+    publication_id TEXT NULL REFERENCES publication(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    source_type TEXT NOT NULL CHECK(source_type IN ('url', 'file', 'managed_file')),
+    location TEXT NOT NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    CHECK(
+        (content_id IS NOT NULL AND publication_id IS NULL)
+        OR (content_id IS NULL AND publication_id IS NOT NULL)
+    )
+);
+
 CREATE TRIGGER prevent_delete_system_content_status
 BEFORE DELETE ON content_status
 FOR EACH ROW

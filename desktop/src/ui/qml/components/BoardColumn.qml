@@ -12,6 +12,20 @@ Frame {
     required property var editDialog
     required property var dragLayer
 
+    function clippedDescription(text) {
+        const source = text.trim()
+        const wordCap = appSettings.cardDescriptionWordCap
+        if (source.length === 0 || wordCap === 0) {
+            return source
+        }
+
+        const words = source.split(/\s+/).filter(function(word) { return word.length > 0 })
+        if (words.length <= wordCap) {
+            return source
+        }
+        return words.slice(0, wordCap).join(" ") + "..."
+    }
+
     implicitWidth: 260
     implicitHeight: 720
 
@@ -103,11 +117,27 @@ Frame {
                 clip: true
                 model: root.model
                 spacing: 8
+                ScrollBar.vertical: ScrollBar {
+                    policy: ScrollBar.AsNeeded
+                    width: 18
+
+                    contentItem: Rectangle {
+                        implicitWidth: 18
+                        radius: 9
+                        color: parent.pressed ? "#8f8f8f" : "#a7a7a7"
+                    }
+
+                    background: Rectangle {
+                        radius: 9
+                        color: "#ececec"
+                    }
+                }
 
                 delegate: Rectangle {
                     id: cardRoot
                     required property string itemId
                     required property string title
+                    required property string description
                     required property string descriptionPreview
                     required property string displayTags
                     required property string pillar
@@ -168,15 +198,16 @@ Frame {
                         }
 
                         Label {
-                            text: descriptionPreview
+                            text: root.clippedDescription(description)
                             visible: text.length > 0
+                            textFormat: appSettings.cardDescriptionMarkdownEnabled ? Text.MarkdownText : Text.PlainText
                             wrapMode: Text.Wrap
                             color: "#505050"
                             Layout.fillWidth: true
                         }
 
                         Label {
-                            text: [pillar, kind, series].filter(function(value) { return value.length > 0 }).join(" | ")
+                            text: [pillar, kind, "Pri " + priority, series].filter(function(value) { return value.length > 0 }).join(" | ")
                             wrapMode: Text.Wrap
                             color: "#505050"
                             visible: text.length > 0
@@ -192,9 +223,10 @@ Frame {
                         }
 
                         Label {
-                            text: "Priority " + priority + (scheduledAt ? " | " + Qt.formatDate(scheduledAt, "yyyy-MM-dd") : "")
+                            text: scheduledAt ? Qt.formatDate(scheduledAt, "yyyy-MM-dd") : ""
                             color: "#505050"
                             wrapMode: Text.Wrap
+                            visible: text.length > 0
                             Layout.fillWidth: true
                         }
 

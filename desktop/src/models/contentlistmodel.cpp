@@ -90,6 +90,8 @@ QVariant ContentListModel::data(const QModelIndex &index, int role) const
         return item.status;
     case PriorityRole:
         return item.priority;
+    case SeriesPositionRole:
+        return item.hasSeriesPosition ? QVariant{item.seriesPosition} : QVariant{};
     case ScheduledAtRole:
         return item.scheduledAt;
     case PublishedAtRole:
@@ -117,6 +119,7 @@ QHash<int, QByteArray> ContentListModel::roleNames() const
         {SuggestedChannelRole, "suggestedChannel"},
         {StatusRole, "status"},
         {PriorityRole, "priority"},
+        {SeriesPositionRole, "seriesPosition"},
         {ScheduledAtRole, "scheduledAt"},
         {PublishedAtRole, "publishedAt"},
     };
@@ -124,7 +127,7 @@ QHash<int, QByteArray> ContentListModel::roleNames() const
 
 void ContentListModel::setDescriptionPreviewWordCap(int value)
 {
-    const auto normalized = std::clamp(value, 3, 30);
+    const auto normalized = std::clamp(value, 0, 500);
     if (descriptionPreviewWordCap_ == normalized) {
         return;
     }
@@ -147,6 +150,10 @@ QString ContentListModel::descriptionPreview(const QString &text) const
     const auto sentence = firstSentence(text);
     if (sentence.isEmpty()) {
         return {};
+    }
+
+    if (descriptionPreviewWordCap_ == 0) {
+        return sentence;
     }
 
     const auto words = sentence.split(u' ', Qt::SkipEmptyParts);
