@@ -85,6 +85,7 @@ private slots:
     void searchesSeriesByNameAndDescription();
     void contentModelBuildsDescriptionPreview();
     void publicationCrudWorks();
+    void publicationFanOutCreatesSelectedChannelsAndSkipsExisting();
     void persistsMediaForContentAndPublication();
     void goalCrudWorks();
     void balanceGoalItemsPersistAndCascadeDelete();
@@ -1576,6 +1577,73 @@ void DatabaseTests::publicationCrudWorks()
 
     QVERIFY2(publicationRepository.remove(publicationId, &errorMessage), qPrintable(errorMessage));
     QVERIFY(publicationRepository.getById(publicationId).id.isEmpty());
+}
+
+void DatabaseTests::publicationFanOutCreatesSelectedChannelsAndSkipsExisting()
+{
+    SmTool::Data::Database database({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-publication-fanout"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto lookups = SmTool::Data::LookupsRepository{database.connection()};
+    auto contentRepository = SmTool::Data::ContentRepository{database.connection()};
+    auto publicationRepository = SmTool::Data::PublicationRepository{database.connection()};
+
+    const auto pillarId = lookups.lookupIdByKey(QStringLiteral("pillar"), QStringLiteral("tech"));
+    const auto kindId = lookups.lookupIdByKey(QStringLiteral("content_kind"), QStringLiteral("idea"));
+    const auto linkedinId = lookups.lookupIdByKey(QStringLiteral("channel"), QStringLiteral("linkedin"));
+    const auto youtubeId = lookups.lookupIdByKey(QStringLiteral("channel"), QStringLiteral("youtube"));
+    const auto xId = lookups.lookupIdByKey(QStringLiteral("channel"), QStringLiteral("x"));
+
+    const auto contentId = contentRepository.create({
+        .title = QStringLiteral("Publication fan out source"),
+        .kindId = kindId,
+        .pillarId = pillarId,
+        .status = QStringLiteral("inbox"),
+        .priority = 10,
+        .createdAt = QDateTime::currentDateTimeUtc(),
+        .updatedAt = QDateTime::currentDateTimeUtc(),
+    }, &errorMessage);
+    QVERIFY2(!contentId.isEmpty(), qPrintable(errorMessage));
+
+    const auto existingPublicationId = publicationRepository.create({
+        .contentId = contentId,
+        .channelId = linkedinId,
+        .status = QStringLiteral("planned"),
+    }, &errorMessage);
+    QVERIFY2(!existingPublicationId.isEmpty(), qPrintable(errorMessage));
+
+    int createdCount = -1;
+    QVERIFY2(publicationRepository.createMissingForContent(contentId,
+                                                           QStringList({linkedinId, youtubeId, xId, youtubeId}),
+                                                           &createdCount,
+                                                           &errorMessage),
+             qPrintable(errorMessage));
+    QCOMPARE(createdCount, 2);
+
+    const auto publications = publicationRepository.listForContent(contentId);
+    QCOMPARE(static_cast<int>(publications.size()), 3);
+
+    QStringList channelIds;
+    for (const auto &publication : publications) {
+        channelIds.append(publication.channelId);
+        QCOMPARE(publication.status, QStringLiteral("planned"));
+    }
+    std::sort(channelIds.begin(), channelIds.end());
+    auto expectedChannelIds = QStringList({linkedinId, xId, youtubeId});
+    std::sort(expectedChannelIds.begin(), expectedChannelIds.end());
+    QCOMPARE(channelIds, expectedChannelIds);
+
+    QVERIFY2(publicationRepository.createMissingForContent(contentId,
+                                                           QStringList({linkedinId, youtubeId, xId}),
+                                                           &createdCount,
+                                                           &errorMessage),
+             qPrintable(errorMessage));
+    QCOMPARE(createdCount, 0);
+    QCOMPARE(static_cast<int>(publicationRepository.listForContent(contentId).size()), 3);
 }
 
 void DatabaseTests::persistsMediaForContentAndPublication()

@@ -5,6 +5,7 @@
 #include <QDateTime>
 #include <QSqlError>
 #include <QSqlQuery>
+#include <QSet>
 #include <QUuid>
 
 using namespace Qt::Literals::StringLiterals;
@@ -122,6 +123,77 @@ QString PublicationRepository::create(const Domain::Publication &publication, QS
     }
 
     return id;
+}
+
+bool PublicationRepository::createMissingForContent(const QString &contentId,
+                                                    const QStringList &channelIds,
+                                                    int *createdCount,
+                                                    QString *errorMessage) const
+{
+    const auto trimmedContentId = contentId.trimmed();
+    if (trimmedContentId.isEmpty()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("Content id is required.");
+        }
+        return false;
+    }
+
+    QStringList requestedChannels;
+    requestedChannels.reserve(channelIds.size());
+    for (const auto &channelId : channelIds) {
+        const auto trimmedChannelId = channelId.trimmed();
+        if (!trimmedChannelId.isEmpty()) {
+            requestedChannels.push_back(trimmedChannelId);
+        }
+    }
+    requestedChannels.removeDuplicates();
+
+    if (requestedChannels.isEmpty()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("Select at least one publication channel.");
+        }
+        return false;
+    }
+
+    QSqlQuery existingQuery{database_};
+    existingQuery.prepare(QStringLiteral("SELECT channel_id FROM publication WHERE content_id = :content_id"));
+    existingQuery.bindValue(":content_id"_L1, trimmedContentId);
+    if (!existingQuery.exec()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = existingQuery.lastError().text();
+        }
+        return false;
+    }
+
+    QSet<QString> existingChannels;
+    while (existingQuery.next()) {
+        existingChannels.insert(existingQuery.value(0).toString());
+    }
+
+    int created = 0;
+    for (const auto &channelId : requestedChannels) {
+        if (existingChannels.contains(channelId)) {
+            continue;
+        }
+
+        if (create({
+                       .contentId = trimmedContentId,
+                       .channelId = channelId,
+                       .status = QStringLiteral("planned"),
+                   },
+                   errorMessage)
+                .isEmpty()) {
+            return false;
+        }
+
+        existingChannels.insert(channelId);
+        ++created;
+    }
+
+    if (createdCount != nullptr) {
+        *createdCount = created;
+    }
+    return true;
 }
 
 bool PublicationRepository::update(const Domain::Publication &publication, QString *errorMessage) const

@@ -336,6 +336,86 @@ ApplicationWindow {
     }
 
     Dialog {
+        id: publicationFanOutDialog
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        modal: true
+        focus: true
+        closePolicy: Popup.NoAutoClose
+        title: qsTr("Publish Fan Out")
+        width: Math.min(window.width - 80, 480)
+        height: Math.min(Math.max(window.height - 80, 900), 500)
+        property string contentId: ""
+        property var optionsModel: []
+        property var selectedChannelIds: []
+
+        function openForContent(nextContentId) {
+            contentId = nextContentId
+            optionsModel = appController.publicationFanOutOptions(nextContentId)
+            selectedChannelIds = []
+            open()
+        }
+
+        function toggleSelection(channelId, checked) {
+            const nextSelection = selectedChannelIds.filter(function(existingChannelId) { return existingChannelId !== channelId })
+            if (checked) {
+                nextSelection.push(channelId)
+            }
+            selectedChannelIds = nextSelection
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 20
+            spacing: 16
+
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("Select the publication channels to create. Existing channels are shown but cannot be selected.")
+                wrapMode: Text.Wrap
+            }
+
+            ScrollView {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+
+                ColumnLayout {
+                    width: parent.width
+                    spacing: 8
+
+                    Repeater {
+                        model: publicationFanOutDialog.optionsModel
+
+                        delegate: CheckBox {
+                            required property var modelData
+                            Layout.fillWidth: true
+                            text: modelData.displayName + (modelData.alreadyExists ? qsTr(" (already exists)") : "")
+                            enabled: !modelData.alreadyExists
+                            checked: publicationFanOutDialog.selectedChannelIds.indexOf(modelData.channelId) >= 0
+                            onToggled: publicationFanOutDialog.toggleSelection(modelData.channelId, checked)
+                        }
+                    }
+                }
+            }
+
+            DialogButtonBox {
+                Layout.fillWidth: true
+                standardButtons: DialogButtonBox.Save | DialogButtonBox.Cancel
+
+                onAccepted: {
+                    if (appController.createPublicationFanOut(publicationFanOutDialog.contentId,
+                                                              publicationFanOutDialog.selectedChannelIds)) {
+                        quickAddDialog.reloadPublications()
+                        publicationFanOutDialog.close()
+                    }
+                }
+                onRejected: publicationFanOutDialog.close()
+            }
+        }
+    }
+
+    Dialog {
         id: quickAddDialog
         parent: Overlay.overlay
         anchors.centerIn: parent
@@ -675,6 +755,11 @@ ApplicationWindow {
                                         Button {
                                             text: "Add Publication"
                                             onClicked: publicationDialog.openForCreate(quickAddDialog.editingContentId)
+                                        }
+
+                                        Button {
+                                            text: "Publish Fan Out"
+                                            onClicked: publicationFanOutDialog.openForContent(quickAddDialog.editingContentId)
                                         }
                                     }
 

@@ -166,6 +166,7 @@ public:
     Q_INVOKABLE bool contentHasDerivedItems(const QString &contentId) const;
     Q_INVOKABLE QVariantMap contentDetails(const QString &contentId) const;
     Q_INVOKABLE QVariantList contentSeriesOptions() const;
+    Q_INVOKABLE QVariantList publicationFanOutOptions(const QString &contentId) const;
     Q_INVOKABLE QVariantMap publicationDetails(const QString &publicationId) const;
     Q_INVOKABLE QVariantMap goalDetails(const QString &goalId) const;
     Q_INVOKABLE QVariantList goalScopeOptions(const QString &scopeType) const;
@@ -196,6 +197,7 @@ public:
                                      const QVariantList &mediaItems,
                                      const QString &mediaDataDir,
                                      bool fetchUrlTitles);
+    Q_INVOKABLE bool createPublicationFanOut(const QString &contentId, const QVariantList &channelIds);
     Q_INVOKABLE bool deletePublication(const QString &publicationId);
     Q_INVOKABLE bool deleteContent(const QString &contentId);
     Q_INVOKABLE bool createInboxItem(const QString &title,

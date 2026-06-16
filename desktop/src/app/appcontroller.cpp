@@ -16,6 +16,7 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QSet>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QRegularExpression>
@@ -860,6 +861,28 @@ QVariantList AppController::contentSeriesOptions() const
     return options;
 }
 
+QVariantList AppController::publicationFanOutOptions(const QString &contentId) const
+{
+    if (!lookupsRepository_ || !publicationRepository_) {
+        return {};
+    }
+
+    QSet<QString> existingChannelIds;
+    for (const auto &publication : publicationRepository_->listForContent(contentId.trimmed())) {
+        existingChannelIds.insert(publication.channelId);
+    }
+
+    QVariantList options;
+    for (const auto &item : lookupsRepository_->activeLookups(QStringLiteral("channel"))) {
+        options.push_back(QVariantMap{
+            {QStringLiteral("channelId"), item.id},
+            {QStringLiteral("displayName"), item.displayName},
+            {QStringLiteral("alreadyExists"), existingChannelIds.contains(item.id)},
+        });
+    }
+    return options;
+}
+
 QVariantMap AppController::publicationDetails(const QString &publicationId) const
 {
     if (!publicationRepository_) {
@@ -1302,6 +1325,55 @@ bool AppController::savePublication(const QString &contentId,
 
     refreshAll();
     setStatusMessage(QStringLiteral("Publication saved."));
+    return true;
+}
+
+bool AppController::createPublicationFanOut(const QString &contentId, const QVariantList &channelIds)
+{
+    if (!publicationRepository_) {
+        setStatusMessage(QStringLiteral("Publication repository is not available."));
+        return false;
+    }
+
+    QStringList selectedChannelIds;
+    selectedChannelIds.reserve(channelIds.size());
+    for (const auto &value : channelIds) {
+        const auto channelId = value.toString().trimmed();
+        if (!channelId.isEmpty()) {
+            selectedChannelIds.append(channelId);
+        }
+    }
+    selectedChannelIds.removeDuplicates();
+
+    int createdCount = 0;
+    QString errorMessage;
+    auto db = database_.connection();
+    if (!beginSavepoint(db, QStringLiteral("app_publication_fanout"), &errorMessage)) {
+        setStatusMessage(errorMessage.isEmpty() ? QStringLiteral("Could not start publication fan out.") : errorMessage);
+        return false;
+    }
+
+    if (!publicationRepository_->createMissingForContent(contentId.trimmed(),
+                                                         selectedChannelIds,
+                                                         &createdCount,
+                                                         &errorMessage)) {
+        rollbackSavepoint(db, QStringLiteral("app_publication_fanout"));
+        setStatusMessage(errorMessage);
+        return false;
+    }
+
+    if (!releaseSavepoint(db, QStringLiteral("app_publication_fanout"), &errorMessage)) {
+        rollbackSavepoint(db, QStringLiteral("app_publication_fanout"));
+        setStatusMessage(errorMessage.isEmpty() ? QStringLiteral("Could not save publication fan out.") : errorMessage);
+        return false;
+    }
+
+    refreshAll();
+    setStatusMessage(createdCount > 0
+                         ? QStringLiteral("Created %1 publication alternative%2.")
+                               .arg(createdCount)
+                               .arg(createdCount == 1 ? QString{} : QStringLiteral("s"))
+                         : QStringLiteral("No new publication alternatives were created."));
     return true;
 }
 
