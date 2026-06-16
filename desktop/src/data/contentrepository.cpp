@@ -280,7 +280,7 @@ std::vector<Domain::ContentSummary> ContentRepository::inboxItems(const QString 
     QSqlQuery query{database_};
     query.prepare(selectSummaryBase() + QStringLiteral(
                       "WHERE c.status = 'inbox' "
-                      "ORDER BY c.created_at DESC, c.priority DESC"));
+                      "ORDER BY c.priority DESC, c.created_at DESC, c.title ASC"));
     query.exec();
     return filteredItems(runSummaryQuery(query), searchQuery);
 }
@@ -295,12 +295,12 @@ std::vector<Domain::ContentSummary> ContentRepository::boardItems(const QString 
     if (status == "archived"_L1) {
         query.prepare(selectSummaryBase() + QStringLiteral(
                           "WHERE c.status = 'archived' AND :include_archived = 1 "
-                          "ORDER BY c.updated_at DESC, c.priority DESC"));
+                          "ORDER BY c.priority DESC, c.updated_at DESC, c.title ASC"));
         query.bindValue(":include_archived"_L1, includeArchived ? 1 : 0);
     } else {
         query.prepare(selectSummaryBase() + QStringLiteral(
                           "WHERE c.status = :status "
-                          "ORDER BY c.updated_at DESC, c.priority DESC"));
+                          "ORDER BY c.priority DESC, c.updated_at DESC, c.title ASC"));
         query.bindValue(":status"_L1, status);
     }
     query.exec();
@@ -312,7 +312,7 @@ std::vector<Domain::ContentSummary> ContentRepository::rootItems(bool includeArc
     QSqlQuery query{database_};
     query.prepare(selectSummaryBase() + QStringLiteral(
                       "WHERE c.parent_id IS NULL AND (:include_archived = 1 OR c.status != 'archived') "
-                      "ORDER BY c.updated_at DESC, c.title ASC, c.priority DESC"));
+                      "ORDER BY c.priority DESC, c.updated_at DESC, c.title ASC"));
     query.bindValue(":include_archived"_L1, includeArchived ? 1 : 0);
     query.exec();
     return filteredItems(runSummaryQuery(query), searchQuery);
@@ -415,7 +415,7 @@ std::vector<Domain::ContentSummary> ContentRepository::childItems(const QString 
     QSqlQuery query{database_};
     query.prepare(selectSummaryBase() + QStringLiteral(
                       "WHERE c.parent_id = :parent_id "
-                      "ORDER BY c.created_at ASC, c.priority DESC"));
+                      "ORDER BY c.priority DESC, c.created_at DESC, c.title ASC"));
     query.bindValue(":parent_id"_L1, parentId);
     query.exec();
     return filteredItems(runSummaryQuery(query), searchQuery);

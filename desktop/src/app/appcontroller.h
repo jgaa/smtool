@@ -163,6 +163,7 @@ public:
     Q_INVOKABLE QString copyMediaFileToDataDir(const QString &sourcePath, const QString &mediaDataDir);
     Q_INVOKABLE void logDebug(const QString &message) const;
     Q_INVOKABLE QObject *boardModelForStatus(const QString &statusId) const;
+    Q_INVOKABLE bool contentHasDerivedItems(const QString &contentId) const;
     Q_INVOKABLE QVariantMap contentDetails(const QString &contentId) const;
     Q_INVOKABLE QVariantList contentSeriesOptions() const;
     Q_INVOKABLE QVariantMap publicationDetails(const QString &publicationId) const;

@@ -11,6 +11,8 @@ Rectangle {
     property int bodyWordCap: 100
     property bool markdownEnabled: true
     property bool selected: false
+    property color borderColorOverride: "transparent"
+    property int borderWidthOverride: 0
     property bool showEditAction: true
     property bool showDeleteAction: true
     default property alias extraContent: extraContainer.data
@@ -34,7 +36,8 @@ Rectangle {
 
     radius: 6
     color: selected ? "#e8f2ff" : "white"
-    border.color: selected ? "#8fb7e6" : "#d5d5d5"
+    border.width: borderWidthOverride > 0 ? borderWidthOverride : 1
+    border.color: borderWidthOverride > 0 ? borderColorOverride : selected ? "#8fb7e6" : "#d5d5d5"
     implicitHeight: cardLayout.implicitHeight + 16
 
     MouseArea {

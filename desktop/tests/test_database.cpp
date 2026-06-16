@@ -75,8 +75,10 @@ private slots:
     void deletesContentTree();
     void updatesContentFields();
     void normalizesAndCachesTags();
-    void sortsInboxByCreatedAtThenPriority();
-    void sortsBoardByUpdatedAtThenPriority();
+    void sortsInboxByPriorityThenCreatedAt();
+    void sortsBoardByPriorityThenUpdatedAt();
+    void sortsRootContentByPriorityThenUpdatedAt();
+    void sortsChildContentByPriorityThenCreatedAt();
     void sortsAllContentByDueDateThenTitle();
     void sortsAllContentByPriorityThenTitle();
     void searchesContentByTextAndTags();
@@ -1080,7 +1082,7 @@ void DatabaseTests::normalizesAndCachesTags()
     QCOMPARE(query.value(0).toString(), QStringLiteral("build-log local_first qt6"));
 }
 
-void DatabaseTests::sortsInboxByCreatedAtThenPriority()
+void DatabaseTests::sortsInboxByPriorityThenCreatedAt()
 {
     SmTool::Data::Database database({
         .databaseFilePath = createTempDatabasePath(),
@@ -1137,13 +1139,13 @@ void DatabaseTests::sortsInboxByCreatedAtThenPriority()
 
     const auto items = contentRepository.inboxItems();
     QVERIFY(items.size() >= 4);
-    QCOMPARE(items.at(0).title, QStringLiteral("Newest Higher"));
-    QCOMPARE(items.at(1).title, QStringLiteral("Newest Lower"));
-    QCOMPARE(items.at(2).title, QStringLiteral("Newer Low"));
-    QCOMPARE(items.at(3).title, QStringLiteral("Older High"));
+    QCOMPARE(items.at(0).title, QStringLiteral("Older High"));
+    QCOMPARE(items.at(1).title, QStringLiteral("Newest Higher"));
+    QCOMPARE(items.at(2).title, QStringLiteral("Newest Lower"));
+    QCOMPARE(items.at(3).title, QStringLiteral("Newer Low"));
 }
 
-void DatabaseTests::sortsBoardByUpdatedAtThenPriority()
+void DatabaseTests::sortsBoardByPriorityThenUpdatedAt()
 {
     SmTool::Data::Database database({
         .databaseFilePath = createTempDatabasePath(),
@@ -1190,9 +1192,133 @@ void DatabaseTests::sortsBoardByUpdatedAtThenPriority()
 
     const auto items = contentRepository.boardItems(QStringLiteral("shaping"), false);
     QVERIFY(items.size() >= 3);
-    QCOMPARE(items.at(0).title, QStringLiteral("Newest Higher"));
-    QCOMPARE(items.at(1).title, QStringLiteral("Newest Lower"));
-    QCOMPARE(items.at(2).title, QStringLiteral("Older High"));
+    QCOMPARE(items.at(0).title, QStringLiteral("Older High"));
+    QCOMPARE(items.at(1).title, QStringLiteral("Newest Higher"));
+    QCOMPARE(items.at(2).title, QStringLiteral("Newest Lower"));
+}
+
+void DatabaseTests::sortsRootContentByPriorityThenUpdatedAt()
+{
+    SmTool::Data::Database database({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-root-sort"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto lookups = SmTool::Data::LookupsRepository{database.connection()};
+    auto contentRepository = SmTool::Data::ContentRepository{database.connection()};
+
+    const auto pillarId = lookups.lookupIdByKey(QStringLiteral("pillar"), QStringLiteral("tech"));
+    const auto kindId = lookups.lookupIdByKey(QStringLiteral("content_kind"), QStringLiteral("idea"));
+
+    const auto parentId = contentRepository.create({
+        .title = QStringLiteral("Older High"),
+        .kindId = kindId,
+        .pillarId = pillarId,
+        .status = QStringLiteral("inbox"),
+        .priority = 99,
+        .createdAt = QDateTime::fromString(QStringLiteral("2026-06-01T10:00:00Z"), Qt::ISODate),
+        .updatedAt = QDateTime::fromString(QStringLiteral("2026-06-01T10:00:00Z"), Qt::ISODate),
+    }, &errorMessage);
+    QVERIFY2(!parentId.isEmpty(), qPrintable(errorMessage));
+
+    const auto secondId = contentRepository.create({
+        .title = QStringLiteral("Newest Higher"),
+        .kindId = kindId,
+        .pillarId = pillarId,
+        .status = QStringLiteral("shaping"),
+        .priority = 50,
+        .createdAt = QDateTime::fromString(QStringLiteral("2026-06-02T10:00:00Z"), Qt::ISODate),
+        .updatedAt = QDateTime::fromString(QStringLiteral("2026-06-03T10:00:00Z"), Qt::ISODate),
+    }, &errorMessage);
+    QVERIFY2(!secondId.isEmpty(), qPrintable(errorMessage));
+
+    const auto thirdId = contentRepository.create({
+        .title = QStringLiteral("Newest Lower"),
+        .kindId = kindId,
+        .pillarId = pillarId,
+        .status = QStringLiteral("drafting"),
+        .priority = 5,
+        .createdAt = QDateTime::fromString(QStringLiteral("2026-06-02T10:00:00Z"), Qt::ISODate),
+        .updatedAt = QDateTime::fromString(QStringLiteral("2026-06-03T10:00:00Z"), Qt::ISODate),
+    }, &errorMessage);
+    QVERIFY2(!thirdId.isEmpty(), qPrintable(errorMessage));
+
+    const auto items = contentRepository.rootItems(false);
+    QVERIFY(items.size() >= 3);
+    QCOMPARE(items.at(0).title, QStringLiteral("Older High"));
+    QCOMPARE(items.at(1).title, QStringLiteral("Newest Higher"));
+    QCOMPARE(items.at(2).title, QStringLiteral("Newest Lower"));
+}
+
+void DatabaseTests::sortsChildContentByPriorityThenCreatedAt()
+{
+    SmTool::Data::Database database({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-child-sort"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto lookups = SmTool::Data::LookupsRepository{database.connection()};
+    auto contentRepository = SmTool::Data::ContentRepository{database.connection()};
+
+    const auto pillarId = lookups.lookupIdByKey(QStringLiteral("pillar"), QStringLiteral("tech"));
+    const auto kindId = lookups.lookupIdByKey(QStringLiteral("content_kind"), QStringLiteral("idea"));
+
+    const auto parentId = contentRepository.create({
+        .title = QStringLiteral("Parent"),
+        .kindId = kindId,
+        .pillarId = pillarId,
+        .status = QStringLiteral("inbox"),
+        .priority = 10,
+        .createdAt = QDateTime::fromString(QStringLiteral("2026-06-01T09:00:00Z"), Qt::ISODate),
+        .updatedAt = QDateTime::fromString(QStringLiteral("2026-06-01T09:00:00Z"), Qt::ISODate),
+    }, &errorMessage);
+    QVERIFY2(!parentId.isEmpty(), qPrintable(errorMessage));
+
+    const auto highId = contentRepository.create({
+        .parentId = parentId,
+        .title = QStringLiteral("Older High"),
+        .kindId = kindId,
+        .pillarId = pillarId,
+        .status = QStringLiteral("drafting"),
+        .priority = 99,
+        .createdAt = QDateTime::fromString(QStringLiteral("2026-06-01T10:00:00Z"), Qt::ISODate),
+        .updatedAt = QDateTime::fromString(QStringLiteral("2026-06-01T10:00:00Z"), Qt::ISODate),
+    }, &errorMessage);
+    QVERIFY2(!highId.isEmpty(), qPrintable(errorMessage));
+
+    const auto mediumId = contentRepository.create({
+        .parentId = parentId,
+        .title = QStringLiteral("Newest Higher"),
+        .kindId = kindId,
+        .pillarId = pillarId,
+        .status = QStringLiteral("drafting"),
+        .priority = 50,
+        .createdAt = QDateTime::fromString(QStringLiteral("2026-06-03T10:00:00Z"), Qt::ISODate),
+        .updatedAt = QDateTime::fromString(QStringLiteral("2026-06-03T10:00:00Z"), Qt::ISODate),
+    }, &errorMessage);
+    QVERIFY2(!mediumId.isEmpty(), qPrintable(errorMessage));
+
+    const auto lowId = contentRepository.create({
+        .parentId = parentId,
+        .title = QStringLiteral("Newest Lower"),
+        .kindId = kindId,
+        .pillarId = pillarId,
+        .status = QStringLiteral("drafting"),
+        .priority = 5,
+        .createdAt = QDateTime::fromString(QStringLiteral("2026-06-04T10:00:00Z"), Qt::ISODate),
+        .updatedAt = QDateTime::fromString(QStringLiteral("2026-06-04T10:00:00Z"), Qt::ISODate),
+    }, &errorMessage);
+    QVERIFY2(!lowId.isEmpty(), qPrintable(errorMessage));
+
+    const auto items = contentRepository.childItems(parentId);
+    QVERIFY(items.size() >= 3);
+    QCOMPARE(items.at(0).title, QStringLiteral("Older High"));
+    QCOMPARE(items.at(1).title, QStringLiteral("Newest Higher"));
+    QCOMPARE(items.at(2).title, QStringLiteral("Newest Lower"));
 }
 
 void DatabaseTests::sortsAllContentByDueDateThenTitle()

@@ -758,6 +758,14 @@ void AppController::logDebug(const QString &message) const
     LOG_DEBUG << message.toStdString();
 }
 
+bool AppController::contentHasDerivedItems(const QString &contentId) const
+{
+    if (!contentRepository_ || contentId.trimmed().isEmpty()) {
+        return false;
+    }
+    return !contentRepository_->childItems(contentId).empty();
+}
+
 bool AppController::createIdeaFromTextInternal(const QString &text, QString *errorMessage)
 {
     const auto trimmed = text.trimmed();

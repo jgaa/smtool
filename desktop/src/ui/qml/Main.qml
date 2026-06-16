@@ -2284,6 +2284,8 @@ ApplicationWindow {
 
                                 width: ListView.view.width
                                 selected: appController.currentSourceId === itemId
+                                borderWidthOverride: appController.contentHasDerivedItems(itemId) ? 2 : 0
+                                borderColorOverride: "#2f6f44"
                                 titleText: title
                                 metaText: [kind, "Pri " + priority, status, series, suggestedChannel].filter(function(value) { return value.length > 0 }).join(" | ")
                                 onClicked: appController.currentSourceId = itemId
