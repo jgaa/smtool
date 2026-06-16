@@ -719,12 +719,20 @@ ApplicationWindow {
                                 font.bold: true
                             }
 
-                            TextArea {
-                                id: inboxDescriptionField
+                            ScrollView {
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: 220
-                                wrapMode: TextEdit.Wrap
-                                placeholderText: "Optional note"
+                                clip: true
+                                ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                                ScrollBar.vertical.policy: ScrollBar.AsNeeded
+
+                                TextArea {
+                                    id: inboxDescriptionField
+                                    width: parent.width
+                                    wrapMode: TextEdit.Wrap
+                                    placeholderText: "Optional note"
+                                    selectByMouse: true
+                                }
                             }
 
                             MediaAttachmentsEditor {
