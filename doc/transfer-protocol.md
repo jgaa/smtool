@@ -181,6 +181,8 @@ The user may choose:
 * Accept
 * Reject
 
+On the sender side the app shows a dialog or popup informing the user that it connects to TCP <address>:<port> and the identity code, formatted as ####-####. When the server replies or close the connection, the dialog/popup closes.
+
 ---
 
 # Continue
@@ -234,7 +236,8 @@ The payload contains captured ideas.
       "title": "Blog post idea",
       "text": "Write about local-first software.",
       "created_at": "2026-06-16T15:30:00Z",
-      "source": "android"
+      "source": "android",
+      "list": "inbox"
     }
   ]
 }
@@ -256,8 +259,9 @@ The payload contains captured ideas.
 | text       | string | yes      |
 | created_at | string | no       |
 | source     | string | no       |
+| list       | string | no       |
 
-The desktop application passes the parsed payload to its internal import function.
+The desktop application passes the parsed payload to its internal import function, that typically adds the ideas to the inbox.
 
 ---
 
@@ -383,8 +387,6 @@ Future protocol versions may add:
 * Certificate-based authentication
 * Automatic discovery
 * Compression
-
-These additions must remain backward-compatible where practical.
 
 ---
 
