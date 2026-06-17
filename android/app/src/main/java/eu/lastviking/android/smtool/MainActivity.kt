@@ -23,14 +23,21 @@ import androidx.navigation.ui.setupActionBarWithNavController
 import eu.lastviking.android.smtool.databinding.ActivityMainBinding
 import eu.lastviking.android.smtool.db.DatabaseHelper
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.BufferedReader
 import java.io.File
+import java.io.InputStreamReader
+import java.io.PrintWriter
+import java.net.InetSocketAddress
+import java.net.Socket
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.Random
 
 class MainActivity : AppCompatActivity() {
 
@@ -69,6 +76,10 @@ class MainActivity : AppCompatActivity() {
         val hasSelection = firstFragment?.getSelectedIds()?.isNotEmpty() ?: false
         menu.findItem(R.id.action_share_selected)?.isVisible = hasSelection
         
+        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
+        val transferEnabled = prefs.getBoolean("transfer_enabled", true)
+        menu.findItem(R.id.action_transfer)?.isVisible = transferEnabled
+        
         return true
     }
 
@@ -106,7 +117,168 @@ class MainActivity : AppCompatActivity() {
                 showSettingsDialog()
                 true
             }
+            R.id.action_transfer -> {
+                val navHostFragment =
+                    supportFragmentManager.findFragmentById(R.id.nav_host_fragment_content_main) as NavHostFragment
+                val firstFragment = navHostFragment.childFragmentManager.fragments.firstOrNull { it is FirstFragment } as? FirstFragment
+                val selectedIds = firstFragment?.getSelectedIds()
+                performTransfer(selectedIds)
+                true
+            }
             else -> super.onOptionsItemSelected(item)
+        }
+    }
+
+    private fun performTransfer(filterIds: List<Long>? = null) {
+        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
+        val serverAddress = prefs.getString("server_address", "") ?: ""
+        val serverPort = prefs.getInt("server_port", 45437)
+
+        if (serverAddress.isBlank()) {
+            showSettingsDialog()
+            return
+        }
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            val dbHelper = DatabaseHelper(this@MainActivity)
+            val allIdeas = dbHelper.getAllIdeas()
+            
+            val ideasToTransfer = if (!filterIds.isNullOrEmpty()) {
+                val selected = allIdeas.filter { filterIds.contains(it.id) }
+                val nonTranscribed = selected.filter { it.status != "transcript" || it.transcript.isNullOrBlank() }
+                
+                if (nonTranscribed.isNotEmpty()) {
+                    withContext(Dispatchers.Main) {
+                        AlertDialog.Builder(this@MainActivity)
+                            .setTitle("Cannot Transfer")
+                            .setMessage("Some selected ideas have not been transcribed yet. Only transcribed text can be transferred.")
+                            .setPositiveButton(android.R.string.ok, null)
+                            .show()
+                    }
+                    return@launch
+                }
+                selected
+            } else {
+                allIdeas.filter { it.status == "transcript" && !it.transcript.isNullOrBlank() }
+            }
+
+            if (ideasToTransfer.isEmpty()) {
+                withContext(Dispatchers.Main) {
+                    AlertDialog.Builder(this@MainActivity)
+                        .setTitle("No Ideas")
+                        .setMessage("There are no transcribed ideas to transfer.")
+                        .setPositiveButton(android.R.string.ok, null)
+                        .show()
+                }
+                return@launch
+            }
+
+            val code = String.format(Locale.US, "%08d", Random().nextInt(100000000))
+            val displayCode = "${code.substring(0, 4)}-${code.substring(4)}"
+
+            withContext(Dispatchers.Main) {
+                val dialog = AlertDialog.Builder(this@MainActivity)
+                    .setTitle(R.string.transferring)
+                    .setMessage(getString(R.string.connecting_to, serverAddress, serverPort) + "\n\n" + getString(R.string.transfer_code, displayCode))
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .create()
+
+                val transferJob = lifecycleScope.launch(Dispatchers.IO) {
+                    var socket: Socket? = null
+                    try {
+                        socket = Socket()
+                        socket.connect(InetSocketAddress(serverAddress, serverPort), 5000)
+                        val writer = PrintWriter(socket.getOutputStream(), true)
+                        val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
+
+                        // 1. Hello
+                        val hello = JSONObject().apply {
+                            put("type", "hello")
+                            put("app", "smtool-transfer")
+                            put("version", 1)
+                            put("code", code)
+                        }
+                        writer.println(hello.toString())
+
+                        // 2. Wait for Continue
+                        val continueLine = reader.readLine() ?: throw Exception("Server closed connection")
+                        val continueJson = JSONObject(continueLine)
+                        if (continueJson.getString("type") != "continue" || !continueJson.getBoolean("ok")) {
+                            throw Exception(continueJson.optString("message", "Rejected by server"))
+                        }
+
+                        // 3. Send Payload
+                        val payload = JSONObject().apply {
+                            put("type", "ideas")
+                            put("version", 1)
+                            val itemsArray = JSONArray()
+                            for (idea in ideasToTransfer) {
+                                val item = JSONObject().apply {
+                                    put("id", idea.uuid)
+                                    put("title", idea.name ?: "Untitled Idea")
+                                    put("text", idea.transcript ?: "")
+                                    put("created_at", SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date(idea.createdAt)))
+                                    put("source", "android")
+                                    put("list", "inbox")
+                                }
+                                itemsArray.put(item)
+                            }
+                            put("items", itemsArray)
+                        }
+                        writer.println(payload.toString())
+
+                        // 4. Wait for Result
+                        val resultLine = reader.readLine() ?: throw Exception("Server closed connection during result")
+                        val resultJson = JSONObject(resultLine)
+                        if (resultJson.getString("type") == "result" && resultJson.getBoolean("ok")) {
+                            // Success! 
+                            val deleteAfterTransfer = prefs.getBoolean("delete_after_transfer", false)
+                            
+                            for (idea in ideasToTransfer) {
+                                if (deleteAfterTransfer) {
+                                    dbHelper.deleteIdea(idea.id)
+                                } else {
+                                    dbHelper.updateExportedStatus(idea.id, true)
+                                }
+                            }
+                            withContext(Dispatchers.Main) {
+                                dialog.dismiss()
+                                AlertDialog.Builder(this@MainActivity)
+                                    .setTitle(R.string.transfer_success)
+                                    .setMessage("Imported ${resultJson.optInt("imported", ideasToTransfer.size)} ideas.")
+                                    .setPositiveButton(android.R.string.ok, null)
+                                    .show()
+                                
+                                val navHostFragment =
+                                    supportFragmentManager.findFragmentById(R.id.nav_host_fragment_content_main) as NavHostFragment
+                                val firstFragment = navHostFragment.childFragmentManager.fragments.firstOrNull { it is FirstFragment } as? FirstFragment
+                                firstFragment?.refreshIdeas()
+                            }
+                        } else {
+                            throw Exception(resultJson.optString("message", "Transfer failed"))
+                        }
+
+                    } catch (e: Exception) {
+                        if (isActive) {
+                            withContext(Dispatchers.Main) {
+                                dialog.dismiss()
+                                AlertDialog.Builder(this@MainActivity)
+                                    .setTitle("Transfer Error")
+                                    .setMessage(e.message)
+                                    .setPositiveButton(android.R.string.ok, null)
+                                    .show()
+                            }
+                        }
+                    } finally {
+                        socket?.close()
+                    }
+                }
+
+                dialog.setOnDismissListener {
+                    transferJob.cancel()
+                }
+                dialog.show()
+            }
         }
     }
 
@@ -117,6 +289,10 @@ class MainActivity : AppCompatActivity() {
         val currentLanguage = prefs.getString("language", "en") ?: "en"
         val currentWords = prefs.getInt("title_word_limit", 6)
         val currentPrompt = prefs.getString("whisper_prompt", "") ?: ""
+        val currentTransferEnabled = prefs.getBoolean("transfer_enabled", true)
+        val currentServerAddress = prefs.getString("server_address", "") ?: ""
+        val currentServerPort = prefs.getInt("server_port", 45437)
+        val currentDeleteAfterTransfer = prefs.getBoolean("delete_after_transfer", false)
         
         val dialogView = layoutInflater.inflate(R.layout.dialog_settings, null)
         val checkTranscribe = dialogView.findViewById<CheckBox>(R.id.check_transcribe_immediately)
@@ -124,11 +300,19 @@ class MainActivity : AppCompatActivity() {
         val spinnerLanguage = dialogView.findViewById<Spinner>(R.id.spinner_language)
         val editWords = dialogView.findViewById<EditText>(R.id.edit_title_word_limit)
         val editPrompt = dialogView.findViewById<EditText>(R.id.edit_whisper_prompt)
+        val checkTransferEnabled = dialogView.findViewById<CheckBox>(R.id.check_transfer_enabled)
+        val checkDeleteAfterTransfer = dialogView.findViewById<CheckBox>(R.id.check_delete_after_transfer)
+        val editServerAddress = dialogView.findViewById<EditText>(R.id.edit_server_address)
+        val editServerPort = dialogView.findViewById<EditText>(R.id.edit_server_port)
         
         checkTranscribe.isChecked = currentTranscribe
         checkKeepAudio.isChecked = currentKeepAudio
         editWords.setText(currentWords.toString())
         editPrompt.setText(currentPrompt)
+        checkTransferEnabled.isChecked = currentTransferEnabled
+        checkDeleteAfterTransfer.isChecked = currentDeleteAfterTransfer
+        editServerAddress.setText(currentServerAddress)
+        editServerPort.setText(currentServerPort.toString())
 
         val adapter = ArrayAdapter.createFromResource(
             this, R.array.languages, android.R.layout.simple_spinner_item
@@ -147,13 +331,21 @@ class MainActivity : AppCompatActivity() {
                 val words = editWords.text.toString().toIntOrNull() ?: 6
                 val prompt = editPrompt.text.toString()
                 val selectedLang = languageCodes[spinnerLanguage.selectedItemPosition]
+                val serverAddress = editServerAddress.text.toString()
+                val serverPort = editServerPort.text.toString().toIntOrNull() ?: 45437
+
                 prefs.edit {
                     putBoolean("transcribe_immediately", checkTranscribe.isChecked)
                     putBoolean("keep_audio", checkKeepAudio.isChecked)
                     putString("language", selectedLang)
                     putInt("title_word_limit", words)
                     putString("whisper_prompt", prompt)
+                    putBoolean("transfer_enabled", checkTransferEnabled.isChecked)
+                    putBoolean("delete_after_transfer", checkDeleteAfterTransfer.isChecked)
+                    putString("server_address", serverAddress)
+                    putInt("server_port", serverPort)
                 }
+                invalidateOptionsMenu()
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()

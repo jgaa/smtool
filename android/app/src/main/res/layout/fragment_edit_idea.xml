@@ -18,6 +18,15 @@
             android:layout_height="wrap_content" />
     </com.google.android.material.textfield.TextInputLayout>
 
+    <TextView
+        android:id="@+id/text_idea_uuid"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:textAppearance="?attr/textAppearanceCaption"
+        android:textColor="?android:attr/textColorSecondary"
+        app:layout_constraintTop_toBottomOf="@id/layout_edit_name" />
+
     <com.google.android.material.textfield.TextInputLayout
         android:id="@+id/layout_edit_transcript"
         android:layout_width="match_parent"
@@ -26,7 +35,7 @@
         android:layout_marginBottom="16dp"
         android:hint="Transcript"
         app:layout_constraintBottom_toTopOf="@id/button_delete"
-        app:layout_constraintTop_toBottomOf="@id/layout_edit_name">
+        app:layout_constraintTop_toBottomOf="@id/text_idea_uuid">
 
         <com.google.android.material.textfield.TextInputEditText
             android:id="@+id/edit_idea_transcript"
@@ -44,7 +53,7 @@
         android:text="Copy"
         app:icon="@android:drawable/ic_menu_save"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/layout_edit_name" />
+        app:layout_constraintTop_toBottomOf="@id/text_idea_uuid" />
 
     <Button
         android:id="@+id/button_delete"

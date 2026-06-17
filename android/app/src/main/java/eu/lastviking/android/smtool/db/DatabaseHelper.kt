@@ -4,15 +4,17 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import java.util.UUID
 
 class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
 
     companion object {
         private const val DATABASE_NAME = "smtool.db"
-        private const val DATABASE_VERSION = 1
+        private const val DATABASE_VERSION = 2
 
         const val TABLE_IDEAS = "ideas"
         const val COLUMN_ID = "id"
+        const val COLUMN_UUID = "uuid"
         const val COLUMN_NAME = "name"
         const val COLUMN_CREATED_AT = "created_at"
         const val COLUMN_TRANSCRIBED_AT = "transcribed_at"
@@ -24,6 +26,7 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME
     override fun onCreate(db: SQLiteDatabase) {
         val createTable = ("CREATE TABLE $TABLE_IDEAS (" +
                 "$COLUMN_ID INTEGER PRIMARY KEY AUTOINCREMENT, " +
+                "$COLUMN_UUID TEXT, " +
                 "$COLUMN_NAME TEXT, " +
                 "$COLUMN_CREATED_AT INTEGER, " +
                 "$COLUMN_TRANSCRIBED_AT INTEGER, " +
@@ -34,13 +37,23 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        db.execSQL("DROP TABLE IF EXISTS $TABLE_IDEAS")
-        onCreate(db)
+        if (oldVersion < 2) {
+            db.execSQL("ALTER TABLE $TABLE_IDEAS ADD COLUMN $COLUMN_UUID TEXT")
+            // Populate existing rows with UUIDs
+            val cursor = db.query(TABLE_IDEAS, arrayOf(COLUMN_ID), null, null, null, null, null)
+            while (cursor.moveToNext()) {
+                val id = cursor.getLong(0)
+                val uuid = UUID.randomUUID().toString()
+                db.execSQL("UPDATE $TABLE_IDEAS SET $COLUMN_UUID = '$uuid' WHERE $COLUMN_ID = $id")
+            }
+            cursor.close()
+        }
     }
 
     fun insertIdea(idea: Idea): Long {
         val db = this.writableDatabase
         val values = ContentValues().apply {
+            put(COLUMN_UUID, idea.uuid)
             put(COLUMN_NAME, idea.name)
             put(COLUMN_CREATED_AT, idea.createdAt)
             put(COLUMN_STATUS, idea.status)
@@ -97,6 +110,14 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME
         db.update(TABLE_IDEAS, values, "$COLUMN_ID = ?", arrayOf(id.toString()))
     }
 
+    fun updateExportedStatus(id: Long, exported: Boolean) {
+        val db = this.writableDatabase
+        val values = ContentValues().apply {
+            put(COLUMN_EXPORTED, if (exported) 1 else 0)
+        }
+        db.update(TABLE_IDEAS, values, "$COLUMN_ID = ?", arrayOf(id.toString()))
+    }
+
     fun getPendingIdeas(): List<Idea> {
         val ideas = mutableListOf<Idea>()
         val db = this.readableDatabase
@@ -106,6 +127,7 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME
             while (moveToNext()) {
                 val idea = Idea(
                     id = getLong(getColumnIndexOrThrow(COLUMN_ID)),
+                    uuid = getString(getColumnIndexOrThrow(COLUMN_UUID)) ?: UUID.randomUUID().toString(),
                     name = getString(getColumnIndexOrThrow(COLUMN_NAME)),
                     createdAt = getLong(getColumnIndexOrThrow(COLUMN_CREATED_AT)),
                     transcribedAt = if (isNull(getColumnIndexOrThrow(COLUMN_TRANSCRIBED_AT))) null else getLong(getColumnIndexOrThrow(COLUMN_TRANSCRIBED_AT)),
@@ -129,6 +151,7 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME
             while (moveToNext()) {
                 val idea = Idea(
                     id = getLong(getColumnIndexOrThrow(COLUMN_ID)),
+                    uuid = getString(getColumnIndexOrThrow(COLUMN_UUID)) ?: UUID.randomUUID().toString(),
                     name = getString(getColumnIndexOrThrow(COLUMN_NAME)),
                     createdAt = getLong(getColumnIndexOrThrow(COLUMN_CREATED_AT)),
                     transcribedAt = if (isNull(getColumnIndexOrThrow(COLUMN_TRANSCRIBED_AT))) null else getLong(getColumnIndexOrThrow(COLUMN_TRANSCRIBED_AT)),

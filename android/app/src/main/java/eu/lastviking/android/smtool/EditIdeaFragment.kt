@@ -47,6 +47,7 @@ class EditIdeaFragment : Fragment() {
                 idea?.let {
                     binding.editIdeaName.setText(it.name)
                     binding.editIdeaTranscript.setText(it.transcript)
+                    binding.textIdeaUuid.text = getString(R.string.uuid_label, it.uuid)
                 }
             }
         }

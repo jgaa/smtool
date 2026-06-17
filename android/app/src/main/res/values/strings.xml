@@ -86,4 +86,15 @@
     <string name="transcribing_ideas">Transcribing ideas...</string>
     <string name="pref_whisper_prompt">Whisper Context/Prompt</string>
     <string name="pref_whisper_prompt_hint">Enter words or phrases, one per line</string>
+    <string name="pref_transfer_enabled">Enable transfer to smtool</string>
+    <string name="pref_server_address">Server address</string>
+    <string name="pref_server_port">Server port</string>
+    <string name="transfer_to_smtool">Transfer to smtool</string>
+    <string name="transferring">Transferring...</string>
+    <string name="transfer_success">Transfer successful</string>
+    <string name="transfer_failed">Transfer failed: %s</string>
+    <string name="transfer_code">Transfer code: %s</string>
+    <string name="connecting_to">Connecting to %s:%d</string>
+    <string name="uuid_label">UUID: %s</string>
+    <string name="pref_delete_after_transfer">Delete ideas after successful transfer</string>
 </resources>

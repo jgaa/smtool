@@ -83,7 +83,7 @@ class FirstFragment : Fragment() {
         return if (::adapter.isInitialized) adapter.getSelectedIds() else emptyList()
     }
 
-    private fun refreshIdeas() {
+    fun refreshIdeas() {
         lifecycleScope.launch(Dispatchers.IO) {
             val ideas = dbHelper.getAllIdeas()
             withContext(Dispatchers.Main) {
