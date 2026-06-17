@@ -26,7 +26,7 @@ Version 1 assumes a trusted local network and does not provide encryption or aut
 
 Transport: TCP
 
-Default Port: TBD
+Default Port: 45437
 
 Connection model:
 
@@ -233,6 +233,7 @@ The payload contains captured ideas.
   "version": 1,
   "items": [
     {
+      "id": "42d9fd00-3edb-4024-9cb9-8a12df811c05",
       "title": "Blog post idea",
       "text": "Write about local-first software.",
       "created_at": "2026-06-16T15:30:00Z",
@@ -253,13 +254,14 @@ The payload contains captured ideas.
 
 ### Item Fields
 
-| Field      | Type   | Required |
+| Field      | Type   | Required | Comments |
 | ---------- | ------ | -------- |
-| title      | string | yes      |
-| text       | string | yes      |
-| created_at | string | no       |
-| source     | string | no       |
-| list       | string | no       |
+| id         | string | no       | UUID To avoid duplicates |
+| title      | string | yes      | |
+| text       | string | yes      | |
+| created_at | string | no       | |
+| source     | string | no       | |
+| list       | string | no       | Hint about where to add the item |
 
 The desktop application passes the parsed payload to its internal import function, that typically adds the ideas to the inbox.
 

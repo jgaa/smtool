@@ -79,6 +79,10 @@ public:
     void setBatchMarkdownImportsEnabled(bool enabled);
     void setImportedIdeaTitleWordCap(int value);
     void setDescriptionPreviewWordCap(int value);
+    bool importTransferredIdeas(const QVariantList &items,
+                                int *importedCount = nullptr,
+                                QString *errorMessage = nullptr);
+    void reportStatusMessage(const QString &message);
 
     [[nodiscard]] Models::ContentListModel *inboxModel();
     [[nodiscard]] Models::ContentStatusListModel *contentStatusModel();
@@ -259,6 +263,18 @@ private:
     void refreshClipboardHasText();
     void setStatusMessage(const QString &message);
     bool createIdeaFromTextInternal(const QString &text, QString *errorMessage = nullptr);
+    bool createInboxItemInternal(const QString &contentId,
+                                 const QString &title,
+                                 const QString &description,
+                                 const QString &tags,
+                                 const QString &pillarId,
+                                 const QString &seriesId,
+                                 int priority,
+                                 const QString &scheduledAt,
+                                 const QString &suggestedChannelId,
+                                 const QVariantList &mediaItems,
+                                 const QString &mediaDataDir,
+                                 bool fetchUrlTitles);
     [[nodiscard]] QVariantList mediaVariantList(const std::vector<Domain::MediaItem> &items) const;
     [[nodiscard]] std::vector<Domain::MediaItem> prepareMediaItems(const QVariantList &items,
                                                                    const QString &mediaDataDir,

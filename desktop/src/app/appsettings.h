@@ -25,6 +25,9 @@ class AppSettings : public QObject
     Q_PROPERTY(bool pruneLogFile READ pruneLogFile WRITE setPruneLogFile NOTIFY pruneLogFileChanged)
     Q_PROPERTY(bool confirmContentDeletion READ confirmContentDeletion WRITE setConfirmContentDeletion NOTIFY confirmContentDeletionChanged)
     Q_PROPERTY(bool fetchAddedUrlTitles READ fetchAddedUrlTitles WRITE setFetchAddedUrlTitles NOTIFY fetchAddedUrlTitlesChanged)
+    Q_PROPERTY(bool mobileConnectEnabled READ mobileConnectEnabled WRITE setMobileConnectEnabled NOTIFY mobileConnectEnabledChanged)
+    Q_PROPERTY(QString mobileConnectListenIp READ mobileConnectListenIp WRITE setMobileConnectListenIp NOTIFY mobileConnectListenIpChanged)
+    Q_PROPERTY(int mobileConnectPort READ mobileConnectPort WRITE setMobileConnectPort NOTIFY mobileConnectPortChanged)
 
 public:
     explicit AppSettings(QObject *parent = nullptr);
@@ -72,6 +75,15 @@ public:
     [[nodiscard]] bool fetchAddedUrlTitles() const;
     void setFetchAddedUrlTitles(bool enabled);
 
+    [[nodiscard]] bool mobileConnectEnabled() const;
+    void setMobileConnectEnabled(bool enabled);
+
+    [[nodiscard]] QString mobileConnectListenIp() const;
+    void setMobileConnectListenIp(const QString &ipAddress);
+
+    [[nodiscard]] int mobileConnectPort() const;
+    void setMobileConnectPort(int port);
+
     void ensureDefaults() const;
 
 signals:
@@ -88,13 +100,18 @@ signals:
     void pruneLogFileChanged();
     void confirmContentDeletionChanged();
     void fetchAddedUrlTitlesChanged();
+    void mobileConnectEnabledChanged();
+    void mobileConnectListenIpChanged();
+    void mobileConnectPortChanged();
 
 private:
     void saveValue(const QString &key, const QVariant &value) const;
     [[nodiscard]] QString normalizedPath(const QString &path) const;
+    [[nodiscard]] QString normalizedMobileConnectListenIp(const QString &ipAddress) const;
     [[nodiscard]] int normalizedDefaultContentPriority(int value) const;
     [[nodiscard]] int normalizedImportedIdeaTitleWordCap(int value) const;
     [[nodiscard]] int normalizedCardDescriptionWordCap(int value) const;
+    [[nodiscard]] int normalizedMobileConnectPort(int value) const;
 };
 
 } // namespace SmTool::App

@@ -31,6 +31,7 @@ set(SMTOOL_SOURCES
     src/app/appsettings.cpp
     src/app/dashboardservice.cpp
     src/app/loggingcontroller.cpp
+    src/app/mobileconnectserver.cpp
     src/data/calendarrepository.cpp
     src/data/contentrepository.cpp
     src/data/database.cpp
@@ -54,6 +55,7 @@ set(SMTOOL_HEADERS
     src/app/appsettings.h
     src/app/dashboardservice.h
     src/app/loggingcontroller.h
+    src/app/mobileconnectserver.h
     src/data/calendarrepository.h
     src/data/contentrepository.h
     src/data/database.h
@@ -91,6 +93,7 @@ qt_add_qml_module(SmToolApp
         src/ui/qml/DashboardView.qml
         src/ui/qml/Main.qml
         src/ui/qml/LogSettings.qml
+        src/ui/qml/MobileConnectSettings.qml
         src/ui/qml/SettingsDialog.qml
         src/ui/qml/SystemSettings.qml
         src/ui/qml/components/BoardColumn.qml
@@ -132,6 +135,7 @@ qt_add_executable(SmToolTests
     src/app/appcontroller.cpp
     src/app/appinfo.cpp
     src/app/dashboardservice.cpp
+    src/app/mobileconnectserver.cpp
     src/data/contentrepository.cpp
     src/data/calendarrepository.cpp
     src/data/database.cpp

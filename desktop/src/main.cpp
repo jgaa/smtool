@@ -1,5 +1,6 @@
 #include "app/appcontroller.h"
 #include "app/appinfo.h"
+#include "app/mobileconnectserver.h"
 #include "app/appsettings.h"
 #include "app/loggingcontroller.h"
 
@@ -101,6 +102,32 @@ int main(int argc, char *argv[])
     QObject::connect(&appSettings, &SmTool::App::AppSettings::cardDescriptionWordCapChanged,
                      &controller, [&appSettings, &controller]() {
         controller.setDescriptionPreviewWordCap(appSettings.cardDescriptionWordCap());
+    });
+
+    SmTool::App::MobileConnectServer mobileConnectServer{&controller};
+    mobileConnectServer.setConfirmationHandler([](const QString &formattedCode) {
+        const auto button = QMessageBox::question(
+            QApplication::activeWindow(),
+            QStringLiteral("Transfer Request"),
+            QStringLiteral("Transfer request received\n\nCode: %1\n\nAccept transfer?").arg(formattedCode),
+            QMessageBox::Yes | QMessageBox::No,
+            QMessageBox::No);
+        return button == QMessageBox::Yes;
+    });
+    mobileConnectServer.applySettings(appSettings.mobileConnectEnabled(),
+                                      appSettings.mobileConnectListenIp(),
+                                      static_cast<quint16>(appSettings.mobileConnectPort()));
+    QObject::connect(&appSettings, &SmTool::App::AppSettings::mobileConnectEnabledChanged,
+                     &mobileConnectServer, [&appSettings, &mobileConnectServer]() {
+        mobileConnectServer.setEnabled(appSettings.mobileConnectEnabled());
+    });
+    QObject::connect(&appSettings, &SmTool::App::AppSettings::mobileConnectListenIpChanged,
+                     &mobileConnectServer, [&appSettings, &mobileConnectServer]() {
+        mobileConnectServer.setListenIp(appSettings.mobileConnectListenIp());
+    });
+    QObject::connect(&appSettings, &SmTool::App::AppSettings::mobileConnectPortChanged,
+                     &mobileConnectServer, [&appSettings, &mobileConnectServer]() {
+        mobileConnectServer.setPort(static_cast<quint16>(appSettings.mobileConnectPort()));
     });
 
     LOG_INFO << "Starting SmTool";

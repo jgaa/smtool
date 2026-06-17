@@ -295,6 +295,115 @@ void AppController::setImportedIdeaTitleWordCap(int value)
     importedIdeaTitleWordCap_ = std::clamp(value, 1, 30);
 }
 
+bool AppController::importTransferredIdeas(const QVariantList &items, int *importedCount, QString *errorMessage)
+{
+    if (!lookupsRepository_) {
+        const auto message = QStringLiteral("Lookups repository is not available.");
+        setStatusMessage(message);
+        if (errorMessage != nullptr) {
+            *errorMessage = message;
+        }
+        if (importedCount != nullptr) {
+            *importedCount = 0;
+        }
+        return false;
+    }
+
+    const auto pillars = lookupsRepository_->activeLookups(QStringLiteral("pillar"));
+    if (pillars.empty()) {
+        const auto message = QStringLiteral("No active pillars are available.");
+        setStatusMessage(message);
+        if (errorMessage != nullptr) {
+            *errorMessage = message;
+        }
+        if (importedCount != nullptr) {
+            *importedCount = 0;
+        }
+        return false;
+    }
+
+    int createdCount = 0;
+    int duplicateCount = 0;
+    QString firstFailure;
+    for (const auto &itemValue : items) {
+        const auto item = itemValue.toMap();
+        const auto itemId = item.value(QStringLiteral("id")).toString().trimmed();
+        const auto title = item.value(QStringLiteral("title")).toString().trimmed();
+        const auto text = item.value(QStringLiteral("text")).toString().trimmed();
+        if (title.isEmpty() || text.isEmpty()) {
+            continue;
+        }
+
+        if (!itemId.isEmpty() && !contentRepository_->getById(itemId).id.isEmpty()) {
+            ++duplicateCount;
+            LOG_WARN << "Discarding duplicate Mobile Connect idea with content id '"
+                     << itemId.toStdString() << "'";
+            continue;
+        }
+
+        if (createInboxItemInternal(itemId,
+                                    title,
+                                    text,
+                                    {},
+                                    pillars.front().id,
+                                    {},
+                                    defaultContentPriority_,
+                                    {},
+                                    {},
+                                    {},
+                                    {},
+                                    false)) {
+            ++createdCount;
+            continue;
+        }
+
+        if (!itemId.isEmpty() && statusMessage_.contains(QStringLiteral("UNIQUE"), Qt::CaseInsensitive)) {
+            ++duplicateCount;
+            LOG_WARN << "Discarding duplicate Mobile Connect idea with content id '"
+                     << itemId.toStdString() << "'";
+            continue;
+        }
+
+        if (firstFailure.isEmpty()) {
+            firstFailure = statusMessage_;
+        }
+    }
+
+    if (importedCount != nullptr) {
+        *importedCount = createdCount;
+    }
+
+    if (createdCount == 0 && duplicateCount == 0) {
+        const auto message = firstFailure.isEmpty() ? QStringLiteral("No valid ideas found.") : firstFailure;
+        setStatusMessage(message);
+        if (errorMessage != nullptr) {
+            *errorMessage = message;
+        }
+        return false;
+    }
+
+    QString message;
+    if (duplicateCount > 0) {
+        message = QStringLiteral("Imported %1 ideas from Mobile Connect. Discarded %2 duplicates.")
+                      .arg(createdCount)
+                      .arg(duplicateCount);
+    } else {
+        message = createdCount == 1
+            ? QStringLiteral("Imported 1 idea from Mobile Connect.")
+            : QStringLiteral("Imported %1 ideas from Mobile Connect.").arg(createdCount);
+    }
+    setStatusMessage(message);
+    if (errorMessage != nullptr) {
+        errorMessage->clear();
+    }
+    return true;
+}
+
+void AppController::reportStatusMessage(const QString &message)
+{
+    setStatusMessage(message);
+}
+
 Models::ContentListModel *AppController::inboxModel() { return &inboxModel_; }
 Models::ContentStatusListModel *AppController::contentStatusModel() { return &contentStatusModel_; }
 Models::CalendarEntryModel *AppController::calendarModel() { return &calendarModel_; }
@@ -1430,6 +1539,33 @@ bool AppController::createInboxItem(const QString &title,
                                     const QString &mediaDataDir,
                                     bool fetchUrlTitles)
 {
+    return createInboxItemInternal({},
+                                   title,
+                                   description,
+                                   tags,
+                                   pillarId,
+                                   seriesId,
+                                   priority,
+                                   scheduledAt,
+                                   suggestedChannelId,
+                                   mediaItems,
+                                   mediaDataDir,
+                                   fetchUrlTitles);
+}
+
+bool AppController::createInboxItemInternal(const QString &contentId,
+                                            const QString &title,
+                                            const QString &description,
+                                            const QString &tags,
+                                            const QString &pillarId,
+                                            const QString &seriesId,
+                                            int priority,
+                                            const QString &scheduledAt,
+                                            const QString &suggestedChannelId,
+                                            const QVariantList &mediaItems,
+                                            const QString &mediaDataDir,
+                                            bool fetchUrlTitles)
+{
     LOG_DEBUG << "createInboxItem requested title='" << title.toStdString()
               << "' mediaItems=" << mediaItems.size();
     if (title.trimmed().isEmpty()) {
@@ -1453,6 +1589,7 @@ bool AppController::createInboxItem(const QString &title,
     }
 
     Domain::ContentItem content{
+        .id = contentId.trimmed(),
         .title = title.trimmed(),
         .description = description.trimmed(),
         .tags = tags,
@@ -1482,23 +1619,23 @@ bool AppController::createInboxItem(const QString &title,
         return false;
     }
 
-    const auto contentId = seriesId.trimmed().isEmpty()
+    const auto createdContentId = seriesId.trimmed().isEmpty()
         ? contentRepository_->create(content, &errorMessage)
         : contentRepository_->createInSeries(seriesId.trimmed(), content, &errorMessage);
-    if (contentId.isEmpty()) {
+    if (createdContentId.isEmpty()) {
         rollbackSavepoint(db, QStringLiteral("app_content_create"));
         setStatusMessage(errorMessage);
         LOG_ERROR << "createInboxItem failed in contentRepository_->create: " << errorMessage.toStdString();
         return false;
     }
-    LOG_DEBUG << "createInboxItem repository create succeeded with contentId='" << contentId.toStdString() << "'";
-    if (!mediaRepository_->replaceForContent(contentId, preparedMedia, &errorMessage)) {
+    LOG_DEBUG << "createInboxItem repository create succeeded with contentId='" << createdContentId.toStdString() << "'";
+    if (!mediaRepository_->replaceForContent(createdContentId, preparedMedia, &errorMessage)) {
         rollbackSavepoint(db, QStringLiteral("app_content_create"));
         setStatusMessage(errorMessage);
         LOG_ERROR << "createInboxItem failed in mediaRepository_->replaceForContent: " << errorMessage.toStdString();
         return false;
     }
-    LOG_DEBUG << "createInboxItem media replace succeeded for contentId='" << contentId.toStdString() << "'";
+    LOG_DEBUG << "createInboxItem media replace succeeded for contentId='" << createdContentId.toStdString() << "'";
     if (!releaseSavepoint(db, QStringLiteral("app_content_create"), &errorMessage)) {
         rollbackSavepoint(db, QStringLiteral("app_content_create"));
         setStatusMessage(errorMessage.isEmpty() ? QStringLiteral("Could not save content media.") : errorMessage);
@@ -1508,7 +1645,7 @@ bool AppController::createInboxItem(const QString &title,
 
     refreshAll();
     setStatusMessage(QStringLiteral("Inbox item created."));
-    LOG_DEBUG << "createInboxItem completed with contentId='" << contentId.toStdString() << "'";
+    LOG_DEBUG << "createInboxItem completed with contentId='" << createdContentId.toStdString() << "'";
     return true;
 }
 

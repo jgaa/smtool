@@ -1,5 +1,6 @@
 #include "app/appcontroller.h"
 #include "app/dashboardservice.h"
+#include "app/mobileconnectserver.h"
 #include "models/contentlistmodel.h"
 #include "data/calendarrepository.h"
 #include "data/contentrepository.h"
@@ -12,7 +13,11 @@
 
 #include <QDir>
 #include <QFileInfo>
+#include <QHostAddress>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QFile>
+#include <QTcpSocket>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QTemporaryDir>
@@ -91,6 +96,9 @@ private slots:
     void balanceGoalItemsPersistAndCascadeDelete();
     void dashboardEvaluatesPerformanceAndPipeline();
     void dashboardUsesPublicationsForChannelGoalsAndSkipsDisabledGoals();
+    void mobileConnectImportsIdeas();
+    void mobileConnectSkipsDuplicateIdeaIds();
+    void mobileConnectRejectsInvalidHello();
 };
 
 void DatabaseTests::createsSchemaAndSeedsDefaults()
@@ -2089,6 +2097,179 @@ void DatabaseTests::dashboardUsesPublicationsForChannelGoalsAndSkipsDisabledGoal
     });
     QVERIFY(recentPublicationsStat != evaluation.statistics.end());
     QCOMPARE(recentPublicationsStat->actualValue, 3.0);
+}
+
+void DatabaseTests::mobileConnectImportsIdeas()
+{
+    SmTool::App::AppController controller({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-mobile-connect-import"),
+    });
+    QString errorMessage;
+    QVERIFY2(controller.initialize(&errorMessage), qPrintable(errorMessage));
+
+    SmTool::App::MobileConnectServer server{&controller};
+    server.setConfirmationHandler([](const QString &) { return true; });
+    server.applySettings(true, QStringLiteral("127.0.0.1"), 0);
+    QVERIFY(server.isRunning());
+
+    QTcpSocket socket;
+    socket.connectToHost(QHostAddress::LocalHost, server.listeningPort());
+    QTRY_COMPARE(socket.state(), QAbstractSocket::ConnectedState);
+
+    const auto hello = QJsonDocument(QJsonObject{
+        {QStringLiteral("type"), QStringLiteral("hello")},
+        {QStringLiteral("app"), QStringLiteral("smtool-transfer")},
+        {QStringLiteral("version"), 1},
+        {QStringLiteral("code"), QStringLiteral("12345678")},
+    }).toJson(QJsonDocument::Compact) + '\n';
+    QCOMPARE(socket.write(hello), hello.size());
+    QVERIFY(socket.flush());
+    QTRY_VERIFY(socket.canReadLine());
+
+    const auto continueMessage = QJsonDocument::fromJson(socket.readLine()).object();
+    QCOMPARE(continueMessage.value(QStringLiteral("type")).toString(), QStringLiteral("continue"));
+    QVERIFY(continueMessage.value(QStringLiteral("ok")).toBool());
+
+    const auto payload = QJsonDocument(QJsonObject{
+        {QStringLiteral("type"), QStringLiteral("ideas")},
+        {QStringLiteral("version"), 1},
+        {QStringLiteral("items"), QJsonArray{
+                                       QJsonObject{
+                                           {QStringLiteral("id"), QStringLiteral("42d9fd00-3edb-4024-9cb9-8a12df811c05")},
+                                           {QStringLiteral("title"), QStringLiteral("Mobile idea")},
+                                           {QStringLiteral("text"), QStringLiteral("Captured on Android")},
+                                           {QStringLiteral("source"), QStringLiteral("android")},
+                                           {QStringLiteral("list"), QStringLiteral("inbox")},
+                                       },
+                                   }},
+    }).toJson(QJsonDocument::Compact) + '\n';
+    QCOMPARE(socket.write(payload), payload.size());
+    QVERIFY(socket.flush());
+    QTRY_VERIFY(socket.canReadLine());
+
+    const auto resultMessage = QJsonDocument::fromJson(socket.readLine()).object();
+    QCOMPARE(resultMessage.value(QStringLiteral("type")).toString(), QStringLiteral("result"));
+    QVERIFY(resultMessage.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(resultMessage.value(QStringLiteral("imported")).toInt(), 1);
+
+    QTRY_COMPARE(controller.inboxModel()->rowCount(), 1);
+}
+
+void DatabaseTests::mobileConnectSkipsDuplicateIdeaIds()
+{
+    SmTool::App::AppController controller({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-mobile-connect-duplicates"),
+    });
+    QString errorMessage;
+    QVERIFY2(controller.initialize(&errorMessage), qPrintable(errorMessage));
+
+    SmTool::App::MobileConnectServer server{&controller};
+    server.setConfirmationHandler([](const QString &) { return true; });
+    server.applySettings(true, QStringLiteral("127.0.0.1"), 0);
+    QVERIFY(server.isRunning());
+
+    const auto payload = QJsonDocument(QJsonObject{
+        {QStringLiteral("type"), QStringLiteral("ideas")},
+        {QStringLiteral("version"), 1},
+        {QStringLiteral("items"), QJsonArray{
+                                       QJsonObject{
+                                           {QStringLiteral("id"), QStringLiteral("42d9fd00-3edb-4024-9cb9-8a12df811c05")},
+                                           {QStringLiteral("title"), QStringLiteral("Mobile idea")},
+                                           {QStringLiteral("text"), QStringLiteral("Captured on Android")},
+                                       },
+                                   }},
+    }).toJson(QJsonDocument::Compact) + '\n';
+
+    QTcpSocket firstSocket;
+    firstSocket.connectToHost(QHostAddress::LocalHost, server.listeningPort());
+    QTRY_COMPARE(firstSocket.state(), QAbstractSocket::ConnectedState);
+
+    const auto firstHello = QJsonDocument(QJsonObject{
+        {QStringLiteral("type"), QStringLiteral("hello")},
+        {QStringLiteral("app"), QStringLiteral("smtool-transfer")},
+        {QStringLiteral("version"), 1},
+        {QStringLiteral("code"), QStringLiteral("12345678")},
+    }).toJson(QJsonDocument::Compact) + '\n';
+    QCOMPARE(firstSocket.write(firstHello), firstHello.size());
+    QVERIFY(firstSocket.flush());
+    QTRY_VERIFY(firstSocket.canReadLine());
+
+    const auto firstContinue = QJsonDocument::fromJson(firstSocket.readLine()).object();
+    QCOMPARE(firstContinue.value(QStringLiteral("type")).toString(), QStringLiteral("continue"));
+    QVERIFY(firstContinue.value(QStringLiteral("ok")).toBool());
+
+    QCOMPARE(firstSocket.write(payload), payload.size());
+    QVERIFY(firstSocket.flush());
+    QTRY_VERIFY(firstSocket.canReadLine());
+
+    const auto firstResult = QJsonDocument::fromJson(firstSocket.readLine()).object();
+    QCOMPARE(firstResult.value(QStringLiteral("type")).toString(), QStringLiteral("result"));
+    QVERIFY(firstResult.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(firstResult.value(QStringLiteral("imported")).toInt(), 1);
+    QTRY_COMPARE(controller.inboxModel()->rowCount(), 1);
+
+    QTcpSocket secondSocket;
+    secondSocket.connectToHost(QHostAddress::LocalHost, server.listeningPort());
+    QTRY_COMPARE(secondSocket.state(), QAbstractSocket::ConnectedState);
+
+    const auto secondHello = QJsonDocument(QJsonObject{
+        {QStringLiteral("type"), QStringLiteral("hello")},
+        {QStringLiteral("app"), QStringLiteral("smtool-transfer")},
+        {QStringLiteral("version"), 1},
+        {QStringLiteral("code"), QStringLiteral("87654321")},
+    }).toJson(QJsonDocument::Compact) + '\n';
+    QCOMPARE(secondSocket.write(secondHello), secondHello.size());
+    QVERIFY(secondSocket.flush());
+    QTRY_VERIFY(secondSocket.canReadLine());
+
+    const auto secondContinue = QJsonDocument::fromJson(secondSocket.readLine()).object();
+    QCOMPARE(secondContinue.value(QStringLiteral("type")).toString(), QStringLiteral("continue"));
+    QVERIFY(secondContinue.value(QStringLiteral("ok")).toBool());
+
+    QCOMPARE(secondSocket.write(payload), payload.size());
+    QVERIFY(secondSocket.flush());
+    QTRY_VERIFY(secondSocket.canReadLine());
+
+    const auto secondResult = QJsonDocument::fromJson(secondSocket.readLine()).object();
+    QCOMPARE(secondResult.value(QStringLiteral("type")).toString(), QStringLiteral("result"));
+    QVERIFY(secondResult.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(secondResult.value(QStringLiteral("imported")).toInt(), 0);
+    QTRY_COMPARE(controller.inboxModel()->rowCount(), 1);
+}
+
+void DatabaseTests::mobileConnectRejectsInvalidHello()
+{
+    SmTool::App::AppController controller({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-mobile-connect-invalid-hello"),
+    });
+    QString errorMessage;
+    QVERIFY2(controller.initialize(&errorMessage), qPrintable(errorMessage));
+
+    SmTool::App::MobileConnectServer server{&controller};
+    server.setConfirmationHandler([](const QString &) { return true; });
+    server.applySettings(true, QStringLiteral("127.0.0.1"), 0);
+    QVERIFY(server.isRunning());
+
+    QTcpSocket socket;
+    socket.connectToHost(QHostAddress::LocalHost, server.listeningPort());
+    QTRY_COMPARE(socket.state(), QAbstractSocket::ConnectedState);
+
+    const auto invalidHello = QJsonDocument(QJsonObject{
+        {QStringLiteral("type"), QStringLiteral("hello")},
+        {QStringLiteral("app"), QStringLiteral("smtool-transfer")},
+        {QStringLiteral("version"), 1},
+        {QStringLiteral("code"), QStringLiteral("1234")},
+    }).toJson(QJsonDocument::Compact) + '\n';
+    QCOMPARE(socket.write(invalidHello), invalidHello.size());
+    QVERIFY(socket.flush());
+    QTRY_VERIFY(socket.canReadLine());
+
+    const auto resultMessage = QJsonDocument::fromJson(socket.readLine()).object();
+    QCOMPARE(resultMessage.value(QStringLiteral("type")).toString(), QStringLiteral("error"));
+    QVERIFY(resultMessage.value(QStringLiteral("message")).toString().contains(QStringLiteral("eight digits")));
 }
 
 QTEST_MAIN(DatabaseTests)

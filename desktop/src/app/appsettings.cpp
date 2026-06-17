@@ -248,6 +248,55 @@ void AppSettings::setFetchAddedUrlTitles(bool enabled)
     emit fetchAddedUrlTitlesChanged();
 }
 
+bool AppSettings::mobileConnectEnabled() const
+{
+    return QSettings{}.value(QStringLiteral("mobileConnect/enabled"), false).toBool();
+}
+
+void AppSettings::setMobileConnectEnabled(bool enabled)
+{
+    if (mobileConnectEnabled() == enabled) {
+        return;
+    }
+
+    saveValue(QStringLiteral("mobileConnect/enabled"), enabled);
+    emit mobileConnectEnabledChanged();
+}
+
+QString AppSettings::mobileConnectListenIp() const
+{
+    return normalizedMobileConnectListenIp(
+        QSettings{}.value(QStringLiteral("mobileConnect/listenIp"), QStringLiteral("0.0.0.0")).toString());
+}
+
+void AppSettings::setMobileConnectListenIp(const QString &ipAddress)
+{
+    const auto normalized = normalizedMobileConnectListenIp(ipAddress);
+    if (mobileConnectListenIp() == normalized) {
+        return;
+    }
+
+    saveValue(QStringLiteral("mobileConnect/listenIp"), normalized);
+    emit mobileConnectListenIpChanged();
+}
+
+int AppSettings::mobileConnectPort() const
+{
+    return normalizedMobileConnectPort(
+        QSettings{}.value(QStringLiteral("mobileConnect/port"), 45437).toInt());
+}
+
+void AppSettings::setMobileConnectPort(int port)
+{
+    const auto normalized = normalizedMobileConnectPort(port);
+    if (mobileConnectPort() == normalized) {
+        return;
+    }
+
+    saveValue(QStringLiteral("mobileConnect/port"), normalized);
+    emit mobileConnectPortChanged();
+}
+
 void AppSettings::ensureDefaults() const
 {
     QSettings settings;
@@ -279,6 +328,15 @@ void AppSettings::ensureDefaults() const
     if (!settings.contains(QStringLiteral("ui/fetchAddedUrlTitles"))) {
         settings.setValue(QStringLiteral("ui/fetchAddedUrlTitles"), false);
     }
+    if (!settings.contains(QStringLiteral("mobileConnect/enabled"))) {
+        settings.setValue(QStringLiteral("mobileConnect/enabled"), false);
+    }
+    if (!settings.contains(QStringLiteral("mobileConnect/listenIp"))) {
+        settings.setValue(QStringLiteral("mobileConnect/listenIp"), QStringLiteral("0.0.0.0"));
+    }
+    if (!settings.contains(QStringLiteral("mobileConnect/port"))) {
+        settings.setValue(QStringLiteral("mobileConnect/port"), 45437);
+    }
     settings.sync();
 }
 
@@ -299,6 +357,12 @@ QString AppSettings::normalizedPath(const QString &path) const
     return QDir::cleanPath(trimmed);
 }
 
+QString AppSettings::normalizedMobileConnectListenIp(const QString &ipAddress) const
+{
+    const auto trimmed = ipAddress.trimmed();
+    return trimmed.isEmpty() ? QStringLiteral("0.0.0.0") : trimmed;
+}
+
 int AppSettings::normalizedDefaultContentPriority(int value) const
 {
     return std::clamp(value, 0, 100);
@@ -312,6 +376,11 @@ int AppSettings::normalizedImportedIdeaTitleWordCap(int value) const
 int AppSettings::normalizedCardDescriptionWordCap(int value) const
 {
     return std::clamp(value, 0, 500);
+}
+
+int AppSettings::normalizedMobileConnectPort(int value) const
+{
+    return std::clamp(value, 1024, 65535);
 }
 
 } // namespace SmTool::App

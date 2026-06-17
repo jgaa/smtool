@@ -21,6 +21,7 @@ Dialog {
             Layout.fillWidth: true
 
             TabButton { text: qsTr("System") }
+            TabButton { text: qsTr("Mobile Connect") }
             TabButton { text: qsTr("Log") }
         }
 
@@ -32,6 +33,13 @@ Dialog {
             Item {
                 SystemSettings {
                     id: systemSettings
+                    anchors.fill: parent
+                }
+            }
+
+            Item {
+                MobileConnectSettings {
+                    id: mobileConnectSettings
                     anchors.fill: parent
                 }
             }
@@ -52,12 +60,14 @@ Dialog {
                 if (!systemSettings.commit()) {
                     return
                 }
+                mobileConnectSettings.commit()
                 logSettings.commit()
                 root.close()
             }
 
             onRejected: {
                 systemSettings.reload()
+                mobileConnectSettings.reload()
                 logSettings.reload()
                 root.close()
             }
@@ -66,6 +76,7 @@ Dialog {
 
     onOpened: {
         systemSettings.reload()
+        mobileConnectSettings.reload()
         logSettings.reload()
     }
 }
