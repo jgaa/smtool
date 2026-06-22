@@ -1,8 +1,10 @@
 #include "data/contentrepository.h"
 
+#include "app/loggingcontroller.h"
 #include "domain/constants.h"
 
 #include <QDateTime>
+#include <QElapsedTimer>
 #include <QRegularExpression>
 #include <QSqlError>
 #include <QSqlQuery>
@@ -640,7 +642,18 @@ bool ContentRepository::update(const Domain::ContentItem &content, QString *erro
         : existing.publishedAt;
 
     QSqlQuery savepoint{database_};
-    savepoint.exec(QStringLiteral("SAVEPOINT content_update"));
+    LOG_TRACE << "ContentRepository::update begin inner savepoint contentId='"
+              << content.id.toStdString() << "' connection='"
+              << database_.connectionName().toStdString() << "'";
+    if (!savepoint.exec(QStringLiteral("SAVEPOINT content_update"))) {
+        if (errorMessage != nullptr) {
+            *errorMessage = savepoint.lastError().text();
+        }
+        LOG_ERROR << "ContentRepository::update failed to begin inner savepoint contentId='"
+                  << content.id.toStdString() << "': "
+                  << savepoint.lastError().text().toStdString();
+        return false;
+    }
 
     QSqlQuery query{database_};
     query.prepare(QStringLiteral(
@@ -651,6 +664,7 @@ bool ContentRepository::update(const Domain::ContentItem &content, QString *erro
         "series_position = :series_position, "
         "kind_id = :kind_id, "
         "pillar_id = :pillar_id, "
+        "outcome_id = :outcome_id, "
         "suggested_channel_id = :suggested_channel_id, "
         "status = :status, "
         "priority = :priority, "
@@ -680,6 +694,7 @@ bool ContentRepository::update(const Domain::ContentItem &content, QString *erro
     query.bindValue(":series_position"_L1, nextPositionForSeries);
     query.bindValue(":kind_id"_L1, content.kindId);
     query.bindValue(":pillar_id"_L1, content.pillarId);
+    query.bindValue(":outcome_id"_L1, nullableString(content.outcomeId.trimmed()));
     query.bindValue(":suggested_channel_id"_L1, nullableString(content.suggestedChannelId));
     query.bindValue(":status"_L1, content.status);
     query.bindValue(":priority"_L1, content.priority);
@@ -687,30 +702,63 @@ bool ContentRepository::update(const Domain::ContentItem &content, QString *erro
     query.bindValue(":published_at"_L1, nullableDateTime(publishedAt));
     query.bindValue(":updated_at"_L1, updatedAt.toString(Qt::ISODate));
     if (query.exec()) {
+        LOG_TRACE << "ContentRepository::update row update succeeded contentId='"
+                  << content.id.toStdString() << "' seriesChanged="
+                  << (seriesChanged ? "true" : "false")
+                  << " outcomeId='" << content.outcomeId.toStdString() << "'";
+        query.finish();
         if (!syncContentTags(database_, content.id, content.tags, errorMessage)) {
+            LOG_ERROR << "ContentRepository::update syncContentTags failed contentId='"
+                      << content.id.toStdString() << "': "
+                      << (errorMessage != nullptr ? errorMessage->toStdString() : std::string{});
             QSqlQuery rollback{database_};
             rollback.exec(QStringLiteral("ROLLBACK TO SAVEPOINT content_update"));
             rollback.exec(QStringLiteral("RELEASE SAVEPOINT content_update"));
             return false;
         }
         if (seriesChanged && !existing.seriesId.isEmpty() && !normalizeSeriesPositions(existing.seriesId, errorMessage)) {
+            LOG_ERROR << "ContentRepository::update normalize old series failed contentId='"
+                      << content.id.toStdString() << "' oldSeriesId='"
+                      << existing.seriesId.toStdString() << "': "
+                      << (errorMessage != nullptr ? errorMessage->toStdString() : std::string{});
             QSqlQuery rollback{database_};
             rollback.exec(QStringLiteral("ROLLBACK TO SAVEPOINT content_update"));
             rollback.exec(QStringLiteral("RELEASE SAVEPOINT content_update"));
             return false;
         }
         if (!content.seriesId.isEmpty() && !normalizeSeriesPositions(content.seriesId, errorMessage)) {
+            LOG_ERROR << "ContentRepository::update normalize new series failed contentId='"
+                      << content.id.toStdString() << "' newSeriesId='"
+                      << content.seriesId.toStdString() << "': "
+                      << (errorMessage != nullptr ? errorMessage->toStdString() : std::string{});
             QSqlQuery rollback{database_};
             rollback.exec(QStringLiteral("ROLLBACK TO SAVEPOINT content_update"));
             rollback.exec(QStringLiteral("RELEASE SAVEPOINT content_update"));
             return false;
         }
         QSqlQuery release{database_};
-        release.exec(QStringLiteral("RELEASE SAVEPOINT content_update"));
-        return true;
+        QElapsedTimer timer;
+        timer.start();
+        LOG_TRACE << "ContentRepository::update releasing inner savepoint contentId='"
+                  << content.id.toStdString() << "'";
+        if (release.exec(QStringLiteral("RELEASE SAVEPOINT content_update"))) {
+            LOG_TRACE << "ContentRepository::update released inner savepoint contentId='"
+                      << content.id.toStdString() << "' elapsedMs=" << timer.elapsed();
+            return true;
+        }
+        if (errorMessage != nullptr) {
+            *errorMessage = release.lastError().text();
+        }
+        LOG_ERROR << "ContentRepository::update failed releasing inner savepoint contentId='"
+                  << content.id.toStdString() << "' elapsedMs=" << timer.elapsed()
+                  << ": " << release.lastError().text().toStdString();
+        return false;
     }
 
     QSqlQuery rollback{database_};
+    LOG_ERROR << "ContentRepository::update row update failed contentId='"
+              << content.id.toStdString() << "': "
+              << query.lastError().text().toStdString();
     rollback.exec(QStringLiteral("ROLLBACK TO SAVEPOINT content_update"));
     rollback.exec(QStringLiteral("RELEASE SAVEPOINT content_update"));
     if (errorMessage != nullptr) {

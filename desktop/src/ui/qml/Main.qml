@@ -172,6 +172,36 @@ ApplicationWindow {
     }
 
     Action {
+        id: editChannelsAction
+        text: qsTr("Edit Channels")
+        onTriggered: channelManagerDialog.openManager()
+    }
+
+    Action {
+        id: editPillarsAction
+        text: qsTr("Edit Pillars")
+        onTriggered: pillarManagerDialog.openManager()
+    }
+
+    Action {
+        id: editContentKindsAction
+        text: qsTr("Edit Content-Kind")
+        onTriggered: contentKindManagerDialog.openManager()
+    }
+
+    Action {
+        id: editStatusesAction
+        text: qsTr("Edit Statuses")
+        onTriggered: contentStatusManagerDialog.openManager()
+    }
+
+    Action {
+        id: editOutcomesAction
+        text: qsTr("Edit Outcomes")
+        onTriggered: outcomeManagerDialog.openManager()
+    }
+
+    Action {
         id: quitAction
         text: qsTr("Quit")
         shortcut: StandardKey.Quit
@@ -207,6 +237,31 @@ ApplicationWindow {
 
     AboutDialog {
         id: aboutDialog
+        parent: Overlay.overlay
+    }
+
+    ChannelManagerDialog {
+        id: channelManagerDialog
+        parent: Overlay.overlay
+    }
+
+    PillarManagerDialog {
+        id: pillarManagerDialog
+        parent: Overlay.overlay
+    }
+
+    ContentKindManagerDialog {
+        id: contentKindManagerDialog
+        parent: Overlay.overlay
+    }
+
+    ContentStatusManagerDialog {
+        id: contentStatusManagerDialog
+        parent: Overlay.overlay
+    }
+
+    OutcomeManagerDialog {
+        id: outcomeManagerDialog
         parent: Overlay.overlay
     }
 
@@ -425,6 +480,7 @@ ApplicationWindow {
         property string editingContentId: ""
         property string presetSeriesId: ""
         property var seriesOptionsModel: []
+        property var outcomeOptionsModel: []
         property var publicationsModel: []
         property var mediaItems: []
         title: editingContentId.length > 0 ? qsTr("Edit Content") : qsTr("Quick Add")
@@ -441,6 +497,7 @@ ApplicationWindow {
             inboxTagsField.clear()
             presetSeriesId = ""
             seriesOptionsModel = appController.contentSeriesOptions()
+            outcomeOptionsModel = appController.contentOutcomeOptions()
             priorityBox.value = appSettings.defaultContentPriority
             scheduledAtSelector.value = ""
             if (statusBox.count > 0) {
@@ -454,6 +511,9 @@ ApplicationWindow {
             }
             if (channelBox.count > 0) {
                 channelBox.currentIndex = 0
+            }
+            if (outcomeBox.count > 0) {
+                outcomeBox.currentIndex = 0
             }
             seriesBox.currentIndex = 0
         }
@@ -496,6 +556,7 @@ ApplicationWindow {
             }
 
             seriesOptionsModel = appController.contentSeriesOptions()
+            outcomeOptionsModel = appController.contentOutcomeOptions()
             editingContentId = item.id
             inboxTitleField.text = item.title
             inboxDescriptionField.text = item.description
@@ -518,6 +579,9 @@ ApplicationWindow {
             if (pillarIndex >= 0) {
                 pillarBox.currentIndex = pillarIndex
             }
+
+            const outcomeIndex = outcomeBox.indexOfValue(item.outcomeId ? item.outcomeId : "")
+            outcomeBox.currentIndex = outcomeIndex >= 0 ? outcomeIndex : 0
 
             const seriesIndex = seriesBox.indexOfValue(item.seriesId)
             seriesBox.currentIndex = seriesIndex >= 0 ? seriesIndex : -1
@@ -683,7 +747,7 @@ ApplicationWindow {
                             }
 
                             GridLayout {
-                                columns: 4
+                                columns: quickAddDialog.editingContentId.length > 0 ? 6 : 4
                                 columnSpacing: 12
                                 rowSpacing: 12
                                 Layout.fillWidth: true
@@ -692,6 +756,19 @@ ApplicationWindow {
                                 DateSelector {
                                     id: scheduledAtSelector
                                     Layout.fillWidth: true
+                                }
+
+                                Label {
+                                    text: "Outcome"
+                                    visible: quickAddDialog.editingContentId.length > 0
+                                }
+                                ComboBox {
+                                    id: outcomeBox
+                                    Layout.fillWidth: true
+                                    visible: quickAddDialog.editingContentId.length > 0
+                                    model: quickAddDialog.outcomeOptionsModel
+                                    textRole: "displayName"
+                                    valueRole: "lookupId"
                                 }
 
                                 Label { text: "Status" }
@@ -875,6 +952,7 @@ ApplicationWindow {
                 onAccepted: {
                     const kindId = kindBox.currentIndex >= 0 ? kindBox.currentValue : ""
                     const pillarId = pillarBox.currentIndex >= 0 ? pillarBox.currentValue : ""
+                    const outcomeId = outcomeBox.currentIndex >= 0 ? outcomeBox.currentValue : ""
                     const seriesId = seriesBox.currentIndex >= 0 ? seriesBox.currentValue : ""
                     const channelId = channelBox.currentIndex >= 0 ? channelBox.currentValue : ""
                     const status = statusBox.currentIndex >= 0 ? statusBox.currentValue : "inbox"
@@ -886,6 +964,7 @@ ApplicationWindow {
                                                       seriesId,
                                                       kindId,
                                                       pillarId,
+                                                      outcomeId,
                                                       priorityBox.value,
                                                       scheduledAtSelector.value,
                                                       channelId,
@@ -1888,9 +1967,14 @@ ApplicationWindow {
 
     menuBar: MenuBar {
         Menu {
-            title: qsTr("&App")
+            title: qsTr("&File")
 
             MenuItem { action: importFromFileAction }
+            MenuItem { action: editChannelsAction }
+            MenuItem { action: editPillarsAction }
+            MenuItem { action: editContentKindsAction }
+            MenuItem { action: editStatusesAction }
+            MenuItem { action: editOutcomesAction }
 
             MenuSeparator {}
 

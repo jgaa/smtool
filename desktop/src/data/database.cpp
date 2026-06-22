@@ -343,6 +343,49 @@ bool insertLookup(QSqlDatabase db, const QString &tableName, QAnyStringView key,
     return executeQuery(query, errorMessage);
 }
 
+bool lookupKeyExists(QSqlDatabase db, const QString &tableName, QAnyStringView key, QString *errorMessage)
+{
+    QSqlQuery query{db};
+    query.prepare(QStringLiteral("SELECT EXISTS(SELECT 1 FROM %1 WHERE key = :key)").arg(tableName));
+    query.bindValue(":key"_L1, key.toString());
+    if (!executeQuery(query, errorMessage)) {
+        return false;
+    }
+    return query.next() && query.value(0).toBool();
+}
+
+int nextLookupSortOrder(QSqlDatabase db, const QString &tableName, QString *errorMessage)
+{
+    QSqlQuery query{db};
+    query.prepare(QStringLiteral("SELECT COALESCE(MAX(sort_order), -1) + 1 FROM %1").arg(tableName));
+    if (!executeQuery(query, errorMessage)) {
+        return -1;
+    }
+    return query.next() ? query.value(0).toInt() : 0;
+}
+
+bool ensureLookupSeeds(QSqlDatabase db,
+                       const QString &tableName,
+                       const auto &seedValues,
+                       QString *errorMessage)
+{
+    auto nextSortOrder = nextLookupSortOrder(db, tableName, errorMessage);
+    if (nextSortOrder < 0) {
+        return false;
+    }
+
+    for (const auto &seedValue : seedValues) {
+        if (lookupKeyExists(db, tableName, seedValue, errorMessage)) {
+            continue;
+        }
+        if (!insertLookup(db, tableName, QString{seedValue}, nextSortOrder, errorMessage)) {
+            return false;
+        }
+        ++nextSortOrder;
+    }
+    return true;
+}
+
 bool insertContentStatus(QSqlDatabase db, const ContentStatusSeed &seed, QString *errorMessage)
 {
     QSqlQuery query{db};
@@ -542,10 +585,11 @@ bool Database::initialize(QString *errorMessage)
 {
     close();
     return open(errorMessage)
+        && configurePragmas(errorMessage)
         && enableForeignKeys(errorMessage)
         && ensureMigrationTable(errorMessage)
         && applyMigrations(errorMessage)
-        && seedDefaults(errorMessage)
+        && (!openedNewDatabase_ || seedDefaults(errorMessage))
         && (!options_.seedDemoData || seedDemoData(errorMessage));
 }
 
@@ -601,6 +645,7 @@ void Database::close()
     }
     QSqlDatabase::removeDatabase(connectionName_);
     connectionName_.clear();
+    openedNewDatabase_ = false;
 }
 
 bool Database::open(QString *errorMessage)
@@ -609,10 +654,12 @@ bool Database::open(QString *errorMessage)
     auto db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName_);
 
     const QFileInfo info{databasePath()};
+    const auto databaseAlreadyExists = info.exists();
     QDir{}.mkpath(info.absolutePath());
     db.setDatabaseName(info.absoluteFilePath());
 
     if (db.open()) {
+        openedNewDatabase_ = !databaseAlreadyExists;
         LOG_INFO << "Opened database '" << info.absoluteFilePath().toStdString() << "'";
         return true;
     }
@@ -621,6 +668,34 @@ bool Database::open(QString *errorMessage)
         *errorMessage = db.lastError().text();
     }
     return false;
+}
+
+bool Database::configurePragmas(QString *errorMessage)
+{
+    QSqlQuery journalModeQuery{connection()};
+    journalModeQuery.prepare(QStringLiteral("PRAGMA journal_mode = WAL"));
+    if (!executeQuery(journalModeQuery, errorMessage)) {
+        LOG_ERROR << "Failed to enable WAL journal mode: "
+                  << (errorMessage != nullptr ? errorMessage->toStdString() : std::string{});
+        return false;
+    }
+    if (journalModeQuery.next()) {
+        LOG_DEBUG << "SQLite journal_mode set to '"
+                  << journalModeQuery.value(0).toString().toStdString() << "'";
+    }
+    journalModeQuery.finish();
+
+    QSqlQuery busyTimeoutQuery{connection()};
+    busyTimeoutQuery.prepare(QStringLiteral("PRAGMA busy_timeout = 5000"));
+    if (!executeQuery(busyTimeoutQuery, errorMessage)) {
+        LOG_ERROR << "Failed to set SQLite busy_timeout: "
+                  << (errorMessage != nullptr ? errorMessage->toStdString() : std::string{});
+        return false;
+    }
+    busyTimeoutQuery.finish();
+    LOG_DEBUG << "SQLite busy_timeout set to 5000 ms";
+
+    return true;
 }
 
 bool Database::enableForeignKeys(QString *errorMessage)
@@ -733,36 +808,20 @@ bool Database::seedDefaults(QString *errorMessage)
         }
     }
 
-    if (!tableHasRows(db, "pillar"_L1, errorMessage)) {
-        for (int index = 0; index < static_cast<int>(Domain::seededPillars.size()); ++index) {
-            if (!insertLookup(db, QStringLiteral("pillar"), Domain::seededPillars.at(index), index, errorMessage)) {
-                return rollbackOnFailure();
-            }
-        }
+    if (!ensureLookupSeeds(db, QStringLiteral("pillar"), Domain::seededPillars, errorMessage)) {
+        return rollbackOnFailure();
     }
 
-    if (!tableHasRows(db, "content_kind"_L1, errorMessage)) {
-        for (int index = 0; index < static_cast<int>(Domain::seededContentKinds.size()); ++index) {
-            if (!insertLookup(db, QStringLiteral("content_kind"), Domain::seededContentKinds.at(index), index, errorMessage)) {
-                return rollbackOnFailure();
-            }
-        }
+    if (!ensureLookupSeeds(db, QStringLiteral("content_kind"), Domain::seededContentKinds, errorMessage)) {
+        return rollbackOnFailure();
     }
 
-    if (!tableHasRows(db, "outcome"_L1, errorMessage)) {
-        for (int index = 0; index < static_cast<int>(Domain::seededOutcomes.size()); ++index) {
-            if (!insertLookup(db, QStringLiteral("outcome"), Domain::seededOutcomes.at(index), index, errorMessage)) {
-                return rollbackOnFailure();
-            }
-        }
+    if (!ensureLookupSeeds(db, QStringLiteral("outcome"), Domain::seededOutcomes, errorMessage)) {
+        return rollbackOnFailure();
     }
 
-    if (!tableHasRows(db, "channel"_L1, errorMessage)) {
-        for (int index = 0; index < static_cast<int>(Domain::seededChannels.size()); ++index) {
-            if (!insertLookup(db, QStringLiteral("channel"), Domain::seededChannels.at(index), index, errorMessage)) {
-                return rollbackOnFailure();
-            }
-        }
+    if (!ensureLookupSeeds(db, QStringLiteral("channel"), Domain::seededChannels, errorMessage)) {
+        return rollbackOnFailure();
     }
 
     if (!syncFanOutTemplates(db, errorMessage)) {

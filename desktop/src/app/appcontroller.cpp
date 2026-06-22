@@ -7,6 +7,7 @@
 #include <QDesktopServices>
 #include <QDir>
 #include <QDateTime>
+#include <QElapsedTimer>
 #include <QEventLoop>
 #include <QFile>
 #include <QFileDialog>
@@ -162,31 +163,53 @@ QString htmlTitle(const QString &html)
 bool beginSavepoint(const QSqlDatabase &db, const QString &name, QString *errorMessage)
 {
     QSqlQuery query{db};
+    LOG_TRACE << "DB savepoint begin requested name='" << name.toStdString()
+              << "' connection='" << db.connectionName().toStdString() << "'";
     if (query.exec(QStringLiteral("SAVEPOINT %1").arg(name))) {
+        LOG_TRACE << "DB savepoint begin succeeded name='" << name.toStdString()
+                  << "' connection='" << db.connectionName().toStdString() << "'";
         return true;
     }
     if (errorMessage != nullptr) {
         *errorMessage = query.lastError().text();
     }
+    LOG_ERROR << "DB savepoint begin failed name='" << name.toStdString()
+              << "' connection='" << db.connectionName().toStdString()
+              << "': " << query.lastError().text().toStdString();
     return false;
 }
 
 void rollbackSavepoint(const QSqlDatabase &db, const QString &name)
 {
     QSqlQuery query{db};
+    LOG_TRACE << "DB savepoint rollback requested name='" << name.toStdString()
+              << "' connection='" << db.connectionName().toStdString() << "'";
     query.exec(QStringLiteral("ROLLBACK TO SAVEPOINT %1").arg(name));
     query.exec(QStringLiteral("RELEASE SAVEPOINT %1").arg(name));
+    LOG_TRACE << "DB savepoint rollback completed name='" << name.toStdString()
+              << "' connection='" << db.connectionName().toStdString() << "'";
 }
 
 bool releaseSavepoint(const QSqlDatabase &db, const QString &name, QString *errorMessage)
 {
     QSqlQuery query{db};
+    QElapsedTimer timer;
+    timer.start();
+    LOG_TRACE << "DB savepoint release requested name='" << name.toStdString()
+              << "' connection='" << db.connectionName().toStdString() << "'";
     if (query.exec(QStringLiteral("RELEASE SAVEPOINT %1").arg(name))) {
+        LOG_TRACE << "DB savepoint release succeeded name='" << name.toStdString()
+                  << "' connection='" << db.connectionName().toStdString()
+                  << "' elapsedMs=" << timer.elapsed();
         return true;
     }
     if (errorMessage != nullptr) {
         *errorMessage = query.lastError().text();
     }
+    LOG_ERROR << "DB savepoint release failed name='" << name.toStdString()
+              << "' connection='" << db.connectionName().toStdString()
+              << "' elapsedMs=" << timer.elapsed()
+              << ": " << query.lastError().text().toStdString();
     return false;
 }
 
@@ -415,6 +438,7 @@ Models::ContentListModel *AppController::seriesContentModel() { return &seriesCo
 Models::LookupListModel *AppController::pillarModel() { return &pillarModel_; }
 Models::LookupListModel *AppController::tagModel() { return &tagModel_; }
 Models::LookupListModel *AppController::kindModel() { return &kindModel_; }
+Models::LookupListModel *AppController::outcomeModel() { return &outcomeModel_; }
 Models::LookupListModel *AppController::channelModel() { return &channelModel_; }
 Models::LookupListModel *AppController::contentSeriesModel() { return &contentSeriesModel_; }
 Models::LookupListModel *AppController::goalSeriesModel() { return &goalSeriesModel_; }
@@ -925,6 +949,7 @@ QVariantMap AppController::contentDetails(const QString &contentId) const
         {QStringLiteral("seriesPosition"), item.hasSeriesPosition ? QVariant{item.seriesPosition} : QVariant{}},
         {QStringLiteral("kindId"), item.kindId},
         {QStringLiteral("pillarId"), item.pillarId},
+        {QStringLiteral("outcomeId"), item.outcomeId},
         {QStringLiteral("priority"), item.priority},
         {QStringLiteral("scheduledAt"), item.scheduledAt.isValid() ? item.scheduledAt.toString(Qt::ISODate) : QString{}},
         {QStringLiteral("suggestedChannelId"), item.suggestedChannelId},
@@ -970,6 +995,36 @@ QVariantList AppController::contentSeriesOptions() const
     return options;
 }
 
+QVariantList AppController::contentOutcomeOptions() const
+{
+    QVariantList options;
+    options.push_back(QVariantMap{
+        {QStringLiteral("lookupId"), QString{}},
+        {QStringLiteral("displayName"), QStringLiteral("Undefined")},
+    });
+
+    if (!lookupsRepository_) {
+        return options;
+    }
+
+    auto outcomes = lookupsRepository_->activeLookups(QStringLiteral("outcome"));
+    std::ranges::sort(outcomes, [](const Domain::LookupValue &left, const Domain::LookupValue &right) {
+        const auto nameOrder = QString::compare(left.displayName, right.displayName, Qt::CaseInsensitive);
+        if (nameOrder != 0) {
+            return nameOrder < 0;
+        }
+        return QString::compare(left.id, right.id, Qt::CaseInsensitive) < 0;
+    });
+
+    for (const auto &item : outcomes) {
+        options.push_back(QVariantMap{
+            {QStringLiteral("lookupId"), item.id},
+            {QStringLiteral("displayName"), item.displayName},
+        });
+    }
+    return options;
+}
+
 QVariantList AppController::publicationFanOutOptions(const QString &contentId) const
 {
     if (!lookupsRepository_ || !publicationRepository_) {
@@ -990,6 +1045,953 @@ QVariantList AppController::publicationFanOutOptions(const QString &contentId) c
         });
     }
     return options;
+}
+
+QVariantList AppController::channelManagementItems() const
+{
+    if (!lookupsRepository_) {
+        return {};
+    }
+
+    QVariantList items;
+    for (const auto &channel : lookupsRepository_->allLookups(QStringLiteral("channel"))) {
+        items.push_back(QVariantMap{
+            {QStringLiteral("channelId"), channel.id},
+            {QStringLiteral("key"), channel.key},
+            {QStringLiteral("displayName"), channel.displayName},
+            {QStringLiteral("isActive"), channel.isActive},
+            {QStringLiteral("sortOrder"), channel.sortOrder},
+        });
+    }
+    return items;
+}
+
+QVariantList AppController::pillarManagementItems() const
+{
+    if (!lookupsRepository_) {
+        return {};
+    }
+
+    QVariantList items;
+    for (const auto &pillar : lookupsRepository_->allLookups(QStringLiteral("pillar"))) {
+        items.push_back(QVariantMap{
+            {QStringLiteral("pillarId"), pillar.id},
+            {QStringLiteral("key"), pillar.key},
+            {QStringLiteral("displayName"), pillar.displayName},
+            {QStringLiteral("isActive"), pillar.isActive},
+            {QStringLiteral("sortOrder"), pillar.sortOrder},
+        });
+    }
+    return items;
+}
+
+QVariantList AppController::contentKindManagementItems() const
+{
+    if (!lookupsRepository_) {
+        return {};
+    }
+
+    QVariantList items;
+    for (const auto &contentKind : lookupsRepository_->allLookups(QStringLiteral("content_kind"))) {
+        items.push_back(QVariantMap{
+            {QStringLiteral("contentKindId"), contentKind.id},
+            {QStringLiteral("key"), contentKind.key},
+            {QStringLiteral("displayName"), contentKind.displayName},
+            {QStringLiteral("isActive"), contentKind.isActive},
+            {QStringLiteral("sortOrder"), contentKind.sortOrder},
+        });
+    }
+    return items;
+}
+
+QVariantList AppController::outcomeManagementItems() const
+{
+    QVariantList items;
+    if (!lookupsRepository_) {
+        return items;
+    }
+
+    for (const auto &outcome : lookupsRepository_->allLookups(QStringLiteral("outcome"))) {
+        items.push_back(QVariantMap{
+            {QStringLiteral("outcomeId"), outcome.id},
+            {QStringLiteral("key"), outcome.key},
+            {QStringLiteral("displayName"), outcome.displayName},
+            {QStringLiteral("isActive"), outcome.isActive},
+            {QStringLiteral("sortOrder"), outcome.sortOrder},
+        });
+    }
+    return items;
+}
+
+QVariantMap AppController::channelDetails(const QString &channelId) const
+{
+    if (!lookupsRepository_) {
+        return {};
+    }
+
+    const auto channel = lookupsRepository_->lookupById(QStringLiteral("channel"), channelId.trimmed());
+    if (channel.id.isEmpty()) {
+        return {};
+    }
+
+    return {
+        {QStringLiteral("channelId"), channel.id},
+        {QStringLiteral("key"), channel.key},
+        {QStringLiteral("displayName"), channel.displayName},
+        {QStringLiteral("isActive"), channel.isActive},
+        {QStringLiteral("sortOrder"), channel.sortOrder},
+    };
+}
+
+QVariantMap AppController::pillarDetails(const QString &pillarId) const
+{
+    if (!lookupsRepository_) {
+        return {};
+    }
+
+    const auto pillar = lookupsRepository_->lookupById(QStringLiteral("pillar"), pillarId.trimmed());
+    if (pillar.id.isEmpty()) {
+        return {};
+    }
+
+    return {
+        {QStringLiteral("pillarId"), pillar.id},
+        {QStringLiteral("key"), pillar.key},
+        {QStringLiteral("displayName"), pillar.displayName},
+        {QStringLiteral("isActive"), pillar.isActive},
+        {QStringLiteral("sortOrder"), pillar.sortOrder},
+    };
+}
+
+QVariantMap AppController::contentKindDetails(const QString &contentKindId) const
+{
+    if (!lookupsRepository_) {
+        return {};
+    }
+
+    const auto contentKind = lookupsRepository_->lookupById(QStringLiteral("content_kind"), contentKindId.trimmed());
+    if (contentKind.id.isEmpty()) {
+        return {};
+    }
+
+    return {
+        {QStringLiteral("contentKindId"), contentKind.id},
+        {QStringLiteral("key"), contentKind.key},
+        {QStringLiteral("displayName"), contentKind.displayName},
+        {QStringLiteral("isActive"), contentKind.isActive},
+        {QStringLiteral("sortOrder"), contentKind.sortOrder},
+    };
+}
+
+QVariantMap AppController::outcomeDetails(const QString &outcomeId) const
+{
+    if (!lookupsRepository_) {
+        return {};
+    }
+
+    const auto outcome = lookupsRepository_->lookupById(QStringLiteral("outcome"), outcomeId.trimmed());
+    if (outcome.id.isEmpty()) {
+        return {};
+    }
+
+    return {
+        {QStringLiteral("outcomeId"), outcome.id},
+        {QStringLiteral("key"), outcome.key},
+        {QStringLiteral("displayName"), outcome.displayName},
+        {QStringLiteral("isActive"), outcome.isActive},
+        {QStringLiteral("sortOrder"), outcome.sortOrder},
+    };
+}
+
+QVariantList AppController::contentStatusManagementItems() const
+{
+    QVariantList items;
+    if (!lookupsRepository_) {
+        return items;
+    }
+
+    for (const auto &contentStatus : lookupsRepository_->contentStatuses()) {
+        items.push_back(QVariantMap{
+            {QStringLiteral("contentStatusId"), contentStatus.id},
+            {QStringLiteral("key"), contentStatus.id},
+            {QStringLiteral("displayName"), Domain::titleFromKey(contentStatus.id)},
+            {QStringLiteral("info"), contentStatus.info},
+            {QStringLiteral("isSystem"), contentStatus.isSystem},
+            {QStringLiteral("sortOrder"), contentStatus.sortOrder},
+        });
+    }
+    return items;
+}
+
+QVariantMap AppController::contentStatusDetails(const QString &contentStatusId) const
+{
+    if (!lookupsRepository_) {
+        return {};
+    }
+
+    const auto contentStatus = lookupsRepository_->contentStatusById(contentStatusId.trimmed());
+    if (contentStatus.id.isEmpty()) {
+        return {};
+    }
+
+    return {
+        {QStringLiteral("contentStatusId"), contentStatus.id},
+        {QStringLiteral("key"), contentStatus.id},
+        {QStringLiteral("displayName"), Domain::titleFromKey(contentStatus.id)},
+        {QStringLiteral("info"), contentStatus.info},
+        {QStringLiteral("isSystem"), contentStatus.isSystem},
+        {QStringLiteral("sortOrder"), contentStatus.sortOrder},
+    };
+}
+
+QVariantMap AppController::validateChannelKey(const QString &channelId, const QString &key) const
+{
+    const auto trimmedId = channelId.trimmed();
+    const auto trimmedKey = key.trimmed();
+
+    if (trimmedKey.isEmpty()) {
+        return {
+            {QStringLiteral("valid"), false},
+            {QStringLiteral("duplicate"), false},
+            {QStringLiteral("message"), QStringLiteral("Key is required.")},
+        };
+    }
+
+    if (!isValidLookupKey(trimmedKey)) {
+        return {
+            {QStringLiteral("valid"), false},
+            {QStringLiteral("duplicate"), false},
+            {QStringLiteral("message"), QStringLiteral("Use letters, numbers, or underscores, starting with a letter.")},
+        };
+    }
+
+    const auto isDuplicate = lookupsRepository_
+        && lookupsRepository_->lookupKeyExists(QStringLiteral("channel"), trimmedKey, trimmedId);
+    if (isDuplicate) {
+        return {
+            {QStringLiteral("valid"), false},
+            {QStringLiteral("duplicate"), true},
+            {QStringLiteral("message"), QStringLiteral("Another channel already uses this key.")},
+        };
+    }
+
+    return {
+        {QStringLiteral("valid"), true},
+        {QStringLiteral("duplicate"), false},
+        {QStringLiteral("message"), QString{}},
+    };
+}
+
+QVariantMap AppController::validatePillarKey(const QString &pillarId, const QString &key) const
+{
+    const auto trimmedId = pillarId.trimmed();
+    const auto trimmedKey = key.trimmed();
+
+    if (trimmedKey.isEmpty()) {
+        return {
+            {QStringLiteral("valid"), false},
+            {QStringLiteral("duplicate"), false},
+            {QStringLiteral("message"), QStringLiteral("Key is required.")},
+        };
+    }
+
+    if (!isValidLookupKey(trimmedKey)) {
+        return {
+            {QStringLiteral("valid"), false},
+            {QStringLiteral("duplicate"), false},
+            {QStringLiteral("message"), QStringLiteral("Use letters, numbers, or underscores, starting with a letter.")},
+        };
+    }
+
+    const auto isDuplicate = lookupsRepository_
+        && lookupsRepository_->lookupKeyExists(QStringLiteral("pillar"), trimmedKey, trimmedId);
+    if (isDuplicate) {
+        return {
+            {QStringLiteral("valid"), false},
+            {QStringLiteral("duplicate"), true},
+            {QStringLiteral("message"), QStringLiteral("Another pillar already uses this key.")},
+        };
+    }
+
+    return {
+        {QStringLiteral("valid"), true},
+        {QStringLiteral("duplicate"), false},
+        {QStringLiteral("message"), QString{}},
+    };
+}
+
+QVariantMap AppController::validateContentKindKey(const QString &contentKindId, const QString &key) const
+{
+    const auto trimmedId = contentKindId.trimmed();
+    const auto trimmedKey = key.trimmed();
+
+    if (trimmedKey.isEmpty()) {
+        return {
+            {QStringLiteral("valid"), false},
+            {QStringLiteral("duplicate"), false},
+            {QStringLiteral("message"), QStringLiteral("Key is required.")},
+        };
+    }
+
+    if (!isValidLookupKey(trimmedKey)) {
+        return {
+            {QStringLiteral("valid"), false},
+            {QStringLiteral("duplicate"), false},
+            {QStringLiteral("message"), QStringLiteral("Use letters, numbers, or underscores, starting with a letter.")},
+        };
+    }
+
+    const auto isDuplicate = lookupsRepository_
+        && lookupsRepository_->lookupKeyExists(QStringLiteral("content_kind"), trimmedKey, trimmedId);
+    if (isDuplicate) {
+        return {
+            {QStringLiteral("valid"), false},
+            {QStringLiteral("duplicate"), true},
+            {QStringLiteral("message"), QStringLiteral("Another content kind already uses this key.")},
+        };
+    }
+
+    return {
+        {QStringLiteral("valid"), true},
+        {QStringLiteral("duplicate"), false},
+        {QStringLiteral("message"), QString{}},
+    };
+}
+
+QVariantMap AppController::validateOutcomeKey(const QString &outcomeId, const QString &key) const
+{
+    const auto trimmedId = outcomeId.trimmed();
+    const auto trimmedKey = key.trimmed();
+
+    if (trimmedKey.isEmpty()) {
+        return {
+            {QStringLiteral("valid"), false},
+            {QStringLiteral("duplicate"), false},
+            {QStringLiteral("message"), QStringLiteral("Key is required.")},
+        };
+    }
+
+    if (!isValidLookupKey(trimmedKey)) {
+        return {
+            {QStringLiteral("valid"), false},
+            {QStringLiteral("duplicate"), false},
+            {QStringLiteral("message"), QStringLiteral("Use letters, numbers, or underscores, starting with a letter.")},
+        };
+    }
+
+    const auto isDuplicate = lookupsRepository_
+        && lookupsRepository_->lookupKeyExists(QStringLiteral("outcome"), trimmedKey, trimmedId);
+    if (isDuplicate) {
+        return {
+            {QStringLiteral("valid"), false},
+            {QStringLiteral("duplicate"), true},
+            {QStringLiteral("message"), QStringLiteral("Another outcome already uses this key.")},
+        };
+    }
+
+    return {
+        {QStringLiteral("valid"), true},
+        {QStringLiteral("duplicate"), false},
+        {QStringLiteral("message"), QString{}},
+    };
+}
+
+QVariantMap AppController::validateContentStatusKey(const QString &contentStatusId, const QString &key) const
+{
+    const auto trimmedId = contentStatusId.trimmed();
+    const auto trimmedKey = key.trimmed();
+
+    if (trimmedKey.isEmpty()) {
+        return {
+            {QStringLiteral("valid"), false},
+            {QStringLiteral("duplicate"), false},
+            {QStringLiteral("message"), QStringLiteral("Key is required.")},
+        };
+    }
+
+    if (!isValidLookupKey(trimmedKey)) {
+        return {
+            {QStringLiteral("valid"), false},
+            {QStringLiteral("duplicate"), false},
+            {QStringLiteral("message"), QStringLiteral("Use letters, numbers, or underscores, starting with a letter.")},
+        };
+    }
+
+    const auto isDuplicate = lookupsRepository_
+        && lookupsRepository_->contentStatusIdExists(trimmedKey, trimmedId);
+    if (isDuplicate) {
+        return {
+            {QStringLiteral("valid"), false},
+            {QStringLiteral("duplicate"), true},
+            {QStringLiteral("message"), QStringLiteral("Another status already uses this key.")},
+        };
+    }
+
+    return {
+        {QStringLiteral("valid"), true},
+        {QStringLiteral("duplicate"), false},
+        {QStringLiteral("message"), QString{}},
+    };
+}
+
+bool AppController::saveChannel(const QString &channelId,
+                                const QString &key,
+                                const QString &displayName,
+                                bool active)
+{
+    if (!lookupsRepository_) {
+        setStatusMessage(QStringLiteral("Lookups repository is not available."));
+        return false;
+    }
+
+    const auto trimmedId = channelId.trimmed();
+    const auto trimmedKey = key.trimmed();
+    const auto trimmedDisplayName = displayName.trimmed();
+    if (trimmedDisplayName.isEmpty()) {
+        setStatusMessage(QStringLiteral("Display name is required."));
+        return false;
+    }
+
+    const auto validation = validateChannelKey(trimmedId, trimmedKey);
+    if (!validation.value(QStringLiteral("valid")).toBool()) {
+        setStatusMessage(validation.value(QStringLiteral("message")).toString());
+        return false;
+    }
+
+    QString errorMessage;
+    if (trimmedId.isEmpty()) {
+        const auto createdId = lookupsRepository_->createChannel({
+            .key = trimmedKey,
+            .displayName = trimmedDisplayName,
+            .description = {},
+            .sortOrder = 0,
+            .isActive = active,
+        }, &errorMessage);
+        if (createdId.isEmpty()) {
+            setStatusMessage(errorMessage.isEmpty() ? QStringLiteral("Could not create channel.") : errorMessage);
+            return false;
+        }
+    } else {
+        const auto existing = lookupsRepository_->lookupById(QStringLiteral("channel"), trimmedId);
+        if (existing.id.isEmpty()) {
+            setStatusMessage(QStringLiteral("Channel not found."));
+            return false;
+        }
+
+        if (!lookupsRepository_->updateChannel({
+                .id = existing.id,
+                .key = trimmedKey,
+                .displayName = trimmedDisplayName,
+                .description = existing.description,
+                .sortOrder = existing.sortOrder,
+                .isActive = active,
+            },
+            &errorMessage)) {
+            setStatusMessage(errorMessage.isEmpty() ? QStringLiteral("Could not save channel.") : errorMessage);
+            return false;
+        }
+    }
+
+    refreshAll();
+    setStatusMessage(trimmedId.isEmpty() ? QStringLiteral("Channel created.") : QStringLiteral("Channel updated."));
+    return true;
+}
+
+bool AppController::savePillar(const QString &pillarId,
+                               const QString &key,
+                               const QString &displayName,
+                               bool active)
+{
+    if (!lookupsRepository_) {
+        setStatusMessage(QStringLiteral("Lookups repository is not available."));
+        return false;
+    }
+
+    const auto trimmedId = pillarId.trimmed();
+    const auto trimmedKey = key.trimmed();
+    const auto trimmedDisplayName = displayName.trimmed();
+    if (trimmedDisplayName.isEmpty()) {
+        setStatusMessage(QStringLiteral("Display name is required."));
+        return false;
+    }
+
+    const auto validation = validatePillarKey(trimmedId, trimmedKey);
+    if (!validation.value(QStringLiteral("valid")).toBool()) {
+        setStatusMessage(validation.value(QStringLiteral("message")).toString());
+        return false;
+    }
+
+    QString errorMessage;
+    if (trimmedId.isEmpty()) {
+        const auto createdId = lookupsRepository_->createPillar({
+            .key = trimmedKey,
+            .displayName = trimmedDisplayName,
+            .description = {},
+            .sortOrder = 0,
+            .isActive = active,
+        }, &errorMessage);
+        if (createdId.isEmpty()) {
+            setStatusMessage(errorMessage.isEmpty() ? QStringLiteral("Could not create pillar.") : errorMessage);
+            return false;
+        }
+    } else {
+        const auto existing = lookupsRepository_->lookupById(QStringLiteral("pillar"), trimmedId);
+        if (existing.id.isEmpty()) {
+            setStatusMessage(QStringLiteral("Pillar not found."));
+            return false;
+        }
+
+        if (!lookupsRepository_->updatePillar({
+                .id = existing.id,
+                .key = trimmedKey,
+                .displayName = trimmedDisplayName,
+                .description = existing.description,
+                .sortOrder = existing.sortOrder,
+                .isActive = active,
+            },
+            &errorMessage)) {
+            setStatusMessage(errorMessage.isEmpty() ? QStringLiteral("Could not save pillar.") : errorMessage);
+            return false;
+        }
+    }
+
+    refreshAll();
+    setStatusMessage(trimmedId.isEmpty() ? QStringLiteral("Pillar created.") : QStringLiteral("Pillar updated."));
+    return true;
+}
+
+bool AppController::saveContentKind(const QString &contentKindId,
+                                    const QString &key,
+                                    const QString &displayName,
+                                    bool active)
+{
+    if (!lookupsRepository_) {
+        setStatusMessage(QStringLiteral("Lookups repository is not available."));
+        return false;
+    }
+
+    const auto trimmedId = contentKindId.trimmed();
+    const auto trimmedKey = key.trimmed();
+    const auto trimmedDisplayName = displayName.trimmed();
+    if (trimmedDisplayName.isEmpty()) {
+        setStatusMessage(QStringLiteral("Display name is required."));
+        return false;
+    }
+
+    const auto validation = validateContentKindKey(trimmedId, trimmedKey);
+    if (!validation.value(QStringLiteral("valid")).toBool()) {
+        setStatusMessage(validation.value(QStringLiteral("message")).toString());
+        return false;
+    }
+
+    QString errorMessage;
+    if (trimmedId.isEmpty()) {
+        const auto createdId = lookupsRepository_->createContentKind({
+            .key = trimmedKey,
+            .displayName = trimmedDisplayName,
+            .description = {},
+            .sortOrder = 0,
+            .isActive = active,
+        }, &errorMessage);
+        if (createdId.isEmpty()) {
+            setStatusMessage(errorMessage.isEmpty() ? QStringLiteral("Could not create content kind.") : errorMessage);
+            return false;
+        }
+    } else {
+        const auto existing = lookupsRepository_->lookupById(QStringLiteral("content_kind"), trimmedId);
+        if (existing.id.isEmpty()) {
+            setStatusMessage(QStringLiteral("Content kind not found."));
+            return false;
+        }
+
+        if (!lookupsRepository_->updateContentKind({
+                .id = existing.id,
+                .key = trimmedKey,
+                .displayName = trimmedDisplayName,
+                .description = existing.description,
+                .sortOrder = existing.sortOrder,
+                .isActive = active,
+            },
+            &errorMessage)) {
+            setStatusMessage(errorMessage.isEmpty() ? QStringLiteral("Could not save content kind.") : errorMessage);
+            return false;
+        }
+    }
+
+    refreshAll();
+    setStatusMessage(trimmedId.isEmpty() ? QStringLiteral("Content kind created.") : QStringLiteral("Content kind updated."));
+    return true;
+}
+
+bool AppController::saveOutcome(const QString &outcomeId,
+                                const QString &key,
+                                const QString &displayName,
+                                bool active)
+{
+    if (!lookupsRepository_) {
+        setStatusMessage(QStringLiteral("Lookups repository is not available."));
+        return false;
+    }
+
+    const auto trimmedId = outcomeId.trimmed();
+    const auto trimmedKey = key.trimmed();
+    const auto trimmedDisplayName = displayName.trimmed();
+    if (trimmedDisplayName.isEmpty()) {
+        setStatusMessage(QStringLiteral("Display name is required."));
+        return false;
+    }
+
+    const auto validation = validateOutcomeKey(trimmedId, trimmedKey);
+    if (!validation.value(QStringLiteral("valid")).toBool()) {
+        setStatusMessage(validation.value(QStringLiteral("message")).toString());
+        return false;
+    }
+
+    QString errorMessage;
+    if (trimmedId.isEmpty()) {
+        const auto createdId = lookupsRepository_->createOutcome({
+            .key = trimmedKey,
+            .displayName = trimmedDisplayName,
+            .description = {},
+            .sortOrder = 0,
+            .isActive = active,
+        }, &errorMessage);
+        if (createdId.isEmpty()) {
+            setStatusMessage(errorMessage.isEmpty() ? QStringLiteral("Could not create outcome.") : errorMessage);
+            return false;
+        }
+    } else {
+        const auto existing = lookupsRepository_->lookupById(QStringLiteral("outcome"), trimmedId);
+        if (existing.id.isEmpty()) {
+            setStatusMessage(QStringLiteral("Outcome not found."));
+            return false;
+        }
+
+        if (!lookupsRepository_->updateOutcome({
+                .id = existing.id,
+                .key = trimmedKey,
+                .displayName = trimmedDisplayName,
+                .description = existing.description,
+                .sortOrder = existing.sortOrder,
+                .isActive = active,
+            },
+            &errorMessage)) {
+            setStatusMessage(errorMessage.isEmpty() ? QStringLiteral("Could not save outcome.") : errorMessage);
+            return false;
+        }
+    }
+
+    refreshAll();
+    setStatusMessage(trimmedId.isEmpty() ? QStringLiteral("Outcome created.") : QStringLiteral("Outcome updated."));
+    return true;
+}
+
+bool AppController::saveContentStatus(const QString &contentStatusId,
+                                      const QString &key,
+                                      const QString &info)
+{
+    if (!lookupsRepository_) {
+        setStatusMessage(QStringLiteral("Lookups repository is not available."));
+        return false;
+    }
+
+    const auto trimmedId = contentStatusId.trimmed();
+    const auto trimmedKey = key.trimmed();
+    const auto validation = validateContentStatusKey(trimmedId, trimmedKey);
+    if (!validation.value(QStringLiteral("valid")).toBool()) {
+        setStatusMessage(validation.value(QStringLiteral("message")).toString());
+        return false;
+    }
+
+    QString errorMessage;
+    if (trimmedId.isEmpty()) {
+        const auto createdId = lookupsRepository_->createContentStatus({
+            .id = trimmedKey,
+            .info = info,
+            .sortOrder = 0,
+            .isSystem = false,
+        }, &errorMessage);
+        if (createdId.isEmpty()) {
+            setStatusMessage(errorMessage.isEmpty() ? QStringLiteral("Could not create status.") : errorMessage);
+            return false;
+        }
+    } else {
+        const auto existing = lookupsRepository_->contentStatusById(trimmedId);
+        if (existing.id.isEmpty()) {
+            setStatusMessage(QStringLiteral("Status not found."));
+            return false;
+        }
+
+        if (!lookupsRepository_->updateContentStatus(trimmedId, {
+                .id = trimmedKey,
+                .info = info,
+                .sortOrder = existing.sortOrder,
+                .isSystem = existing.isSystem,
+            },
+            &errorMessage)) {
+            setStatusMessage(errorMessage.isEmpty() ? QStringLiteral("Could not save status.") : errorMessage);
+            return false;
+        }
+    }
+
+    refreshAll();
+    setStatusMessage(trimmedId.isEmpty() ? QStringLiteral("Status created.") : QStringLiteral("Status updated."));
+    return true;
+}
+
+bool AppController::saveChannelOrder(const QVariantList &orderedChannelIds)
+{
+    if (!lookupsRepository_) {
+        setStatusMessage(QStringLiteral("Lookups repository is not available."));
+        return false;
+    }
+
+    QStringList channelIds;
+    channelIds.reserve(orderedChannelIds.size());
+    for (const auto &value : orderedChannelIds) {
+        const auto channelId = value.toString().trimmed();
+        if (!channelId.isEmpty()) {
+            channelIds.append(channelId);
+        }
+    }
+
+    QString errorMessage;
+    if (!lookupsRepository_->reorderChannels(channelIds, &errorMessage)) {
+        setStatusMessage(errorMessage.isEmpty() ? QStringLiteral("Could not save channel order.") : errorMessage);
+        return false;
+    }
+
+    refreshAll();
+    setStatusMessage(QStringLiteral("Channel order updated."));
+    return true;
+}
+
+bool AppController::savePillarOrder(const QVariantList &orderedPillarIds)
+{
+    if (!lookupsRepository_) {
+        setStatusMessage(QStringLiteral("Lookups repository is not available."));
+        return false;
+    }
+
+    QStringList pillarIds;
+    pillarIds.reserve(orderedPillarIds.size());
+    for (const auto &value : orderedPillarIds) {
+        const auto pillarId = value.toString().trimmed();
+        if (!pillarId.isEmpty()) {
+            pillarIds.append(pillarId);
+        }
+    }
+
+    QString errorMessage;
+    if (!lookupsRepository_->reorderPillars(pillarIds, &errorMessage)) {
+        setStatusMessage(errorMessage.isEmpty() ? QStringLiteral("Could not save pillar order.") : errorMessage);
+        return false;
+    }
+
+    refreshAll();
+    setStatusMessage(QStringLiteral("Pillar order updated."));
+    return true;
+}
+
+bool AppController::saveContentKindOrder(const QVariantList &orderedContentKindIds)
+{
+    if (!lookupsRepository_) {
+        setStatusMessage(QStringLiteral("Lookups repository is not available."));
+        return false;
+    }
+
+    QStringList contentKindIds;
+    contentKindIds.reserve(orderedContentKindIds.size());
+    for (const auto &value : orderedContentKindIds) {
+        const auto contentKindId = value.toString().trimmed();
+        if (!contentKindId.isEmpty()) {
+            contentKindIds.append(contentKindId);
+        }
+    }
+
+    QString errorMessage;
+    if (!lookupsRepository_->reorderContentKinds(contentKindIds, &errorMessage)) {
+        setStatusMessage(errorMessage.isEmpty() ? QStringLiteral("Could not save content kind order.") : errorMessage);
+        return false;
+    }
+
+    refreshAll();
+    setStatusMessage(QStringLiteral("Content kind order updated."));
+    return true;
+}
+
+bool AppController::saveOutcomeOrder(const QVariantList &orderedOutcomeIds)
+{
+    if (!lookupsRepository_) {
+        setStatusMessage(QStringLiteral("Lookups repository is not available."));
+        return false;
+    }
+
+    QStringList outcomeIds;
+    outcomeIds.reserve(orderedOutcomeIds.size());
+    for (const auto &value : orderedOutcomeIds) {
+        const auto outcomeId = value.toString().trimmed();
+        if (!outcomeId.isEmpty()) {
+            outcomeIds.append(outcomeId);
+        }
+    }
+
+    QString errorMessage;
+    if (!lookupsRepository_->reorderOutcomes(outcomeIds, &errorMessage)) {
+        setStatusMessage(errorMessage.isEmpty() ? QStringLiteral("Could not save outcome order.") : errorMessage);
+        return false;
+    }
+
+    refreshAll();
+    setStatusMessage(QStringLiteral("Outcome order updated."));
+    return true;
+}
+
+bool AppController::saveContentStatusOrder(const QVariantList &orderedContentStatusIds)
+{
+    if (!lookupsRepository_) {
+        setStatusMessage(QStringLiteral("Lookups repository is not available."));
+        return false;
+    }
+
+    QStringList contentStatusIds;
+    contentStatusIds.reserve(orderedContentStatusIds.size());
+    for (const auto &value : orderedContentStatusIds) {
+        const auto contentStatusId = value.toString().trimmed();
+        if (!contentStatusId.isEmpty()) {
+            contentStatusIds.append(contentStatusId);
+        }
+    }
+
+    QString errorMessage;
+    if (!lookupsRepository_->reorderContentStatuses(contentStatusIds, &errorMessage)) {
+        setStatusMessage(errorMessage.isEmpty() ? QStringLiteral("Could not save status order.") : errorMessage);
+        return false;
+    }
+
+    refreshAll();
+    setStatusMessage(QStringLiteral("Status order updated."));
+    return true;
+}
+
+bool AppController::deleteChannel(const QString &channelId)
+{
+    if (!lookupsRepository_) {
+        setStatusMessage(QStringLiteral("Lookups repository is not available."));
+        return false;
+    }
+
+    const auto trimmedId = channelId.trimmed();
+    if (trimmedId.isEmpty()) {
+        setStatusMessage(QStringLiteral("Channel id is required."));
+        return false;
+    }
+
+    QString errorMessage;
+    if (!lookupsRepository_->deleteChannel(trimmedId, &errorMessage)) {
+        setStatusMessage(errorMessage.isEmpty() ? QStringLiteral("Could not delete channel.") : errorMessage);
+        return false;
+    }
+
+    refreshAll();
+    setStatusMessage(QStringLiteral("Channel deleted."));
+    return true;
+}
+
+bool AppController::deletePillar(const QString &pillarId)
+{
+    if (!lookupsRepository_) {
+        setStatusMessage(QStringLiteral("Lookups repository is not available."));
+        return false;
+    }
+
+    const auto trimmedId = pillarId.trimmed();
+    if (trimmedId.isEmpty()) {
+        setStatusMessage(QStringLiteral("Pillar id is required."));
+        return false;
+    }
+
+    QString errorMessage;
+    if (!lookupsRepository_->deletePillar(trimmedId, &errorMessage)) {
+        setStatusMessage(errorMessage.isEmpty() ? QStringLiteral("Could not delete pillar.") : errorMessage);
+        return false;
+    }
+
+    refreshAll();
+    setStatusMessage(QStringLiteral("Pillar deleted."));
+    return true;
+}
+
+bool AppController::deleteContentKind(const QString &contentKindId)
+{
+    if (!lookupsRepository_) {
+        setStatusMessage(QStringLiteral("Lookups repository is not available."));
+        return false;
+    }
+
+    const auto trimmedId = contentKindId.trimmed();
+    if (trimmedId.isEmpty()) {
+        setStatusMessage(QStringLiteral("Content kind id is required."));
+        return false;
+    }
+
+    QString errorMessage;
+    if (!lookupsRepository_->deleteContentKind(trimmedId, &errorMessage)) {
+        setStatusMessage(errorMessage.isEmpty() ? QStringLiteral("Could not delete content kind.") : errorMessage);
+        return false;
+    }
+
+    refreshAll();
+    setStatusMessage(QStringLiteral("Content kind deleted."));
+    return true;
+}
+
+bool AppController::deleteOutcome(const QString &outcomeId)
+{
+    if (!lookupsRepository_) {
+        setStatusMessage(QStringLiteral("Lookups repository is not available."));
+        return false;
+    }
+
+    const auto trimmedId = outcomeId.trimmed();
+    if (trimmedId.isEmpty()) {
+        setStatusMessage(QStringLiteral("Outcome id is required."));
+        return false;
+    }
+
+    QString errorMessage;
+    if (!lookupsRepository_->deleteOutcome(trimmedId, &errorMessage)) {
+        setStatusMessage(errorMessage.isEmpty() ? QStringLiteral("Could not delete outcome.") : errorMessage);
+        return false;
+    }
+
+    refreshAll();
+    setStatusMessage(QStringLiteral("Outcome deleted."));
+    return true;
+}
+
+bool AppController::deleteContentStatus(const QString &contentStatusId)
+{
+    if (!lookupsRepository_) {
+        setStatusMessage(QStringLiteral("Lookups repository is not available."));
+        return false;
+    }
+
+    const auto trimmedId = contentStatusId.trimmed();
+    if (trimmedId.isEmpty()) {
+        setStatusMessage(QStringLiteral("Status id is required."));
+        return false;
+    }
+
+    QString errorMessage;
+    if (!lookupsRepository_->deleteContentStatus(trimmedId, &errorMessage)) {
+        setStatusMessage(errorMessage.isEmpty() ? QStringLiteral("Could not delete status.") : errorMessage);
+        return false;
+    }
+
+    refreshAll();
+    setStatusMessage(QStringLiteral("Status deleted."));
+    return true;
 }
 
 QVariantMap AppController::publicationDetails(const QString &publicationId) const
@@ -1258,6 +2260,7 @@ bool AppController::updateContent(const QString &contentId,
                                   const QString &seriesId,
                                   const QString &kindId,
                                   const QString &pillarId,
+                                  const QString &outcomeId,
                                   int priority,
                                   const QString &scheduledAt,
                                   const QString &suggestedChannelId,
@@ -1304,6 +2307,7 @@ bool AppController::updateContent(const QString &contentId,
     updated.seriesId = seriesId.trimmed();
     updated.kindId = kindId.trimmed().isEmpty() ? existing.kindId : kindId;
     updated.pillarId = pillarId;
+    updated.outcomeId = outcomeId.trimmed();
     updated.priority = priority;
     updated.scheduledAt = scheduled;
     updated.suggestedChannelId = suggestedChannelId;
@@ -2102,6 +3106,7 @@ void AppController::loadLookupModels()
     pillarModel_.setItems(lookupsRepository_->activeLookups(QStringLiteral("pillar")));
     tagModel_.setItems(lookupsRepository_->tags());
     kindModel_.setItems(lookupsRepository_->activeLookups(QStringLiteral("content_kind")));
+    outcomeModel_.setItems(lookupsRepository_->activeLookups(QStringLiteral("outcome")));
     channelModel_.setItems(lookupsRepository_->activeLookups(QStringLiteral("channel")));
     contentSeriesModel_.setItems(lookupsRepository_->series(false));
     goalSeriesModel_.setItems(lookupsRepository_->series());
@@ -2244,6 +3249,12 @@ void AppController::refreshClipboardHasText()
 
     clipboardHasText_ = hasText;
     emit clipboardHasTextChanged();
+}
+
+bool AppController::isValidLookupKey(const QString &key) const
+{
+    static const QRegularExpression pattern(QStringLiteral("^[A-Za-z][A-Za-z0-9_]*$"));
+    return pattern.match(key).hasMatch();
 }
 
 void AppController::setStatusMessage(const QString &message)

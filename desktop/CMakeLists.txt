@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.28)
 
-project(SmTool VERSION 0.2.0 LANGUAGES CXX)
+project(SmTool VERSION 0.3.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -90,10 +90,20 @@ qt_add_qml_module(SmToolApp
     VERSION 1.0
     QML_FILES
         src/ui/qml/AboutDialog.qml
+        src/ui/qml/ChannelEditorDialog.qml
+        src/ui/qml/ChannelManagerDialog.qml
+        src/ui/qml/ContentKindEditorDialog.qml
+        src/ui/qml/ContentKindManagerDialog.qml
+        src/ui/qml/ContentStatusEditorDialog.qml
+        src/ui/qml/ContentStatusManagerDialog.qml
         src/ui/qml/DashboardView.qml
         src/ui/qml/Main.qml
         src/ui/qml/LogSettings.qml
         src/ui/qml/MobileConnectSettings.qml
+        src/ui/qml/OutcomeEditorDialog.qml
+        src/ui/qml/OutcomeManagerDialog.qml
+        src/ui/qml/PillarEditorDialog.qml
+        src/ui/qml/PillarManagerDialog.qml
         src/ui/qml/SettingsDialog.qml
         src/ui/qml/SystemSettings.qml
         src/ui/qml/components/BoardColumn.qml

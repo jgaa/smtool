@@ -40,6 +40,7 @@ class AppController : public QObject
     Q_PROPERTY(SmTool::Models::LookupListModel *pillarModel READ pillarModel CONSTANT)
     Q_PROPERTY(SmTool::Models::LookupListModel *tagModel READ tagModel CONSTANT)
     Q_PROPERTY(SmTool::Models::LookupListModel *kindModel READ kindModel CONSTANT)
+    Q_PROPERTY(SmTool::Models::LookupListModel *outcomeModel READ outcomeModel CONSTANT)
     Q_PROPERTY(SmTool::Models::LookupListModel *channelModel READ channelModel CONSTANT)
     Q_PROPERTY(SmTool::Models::LookupListModel *contentSeriesModel READ contentSeriesModel CONSTANT)
     Q_PROPERTY(SmTool::Models::LookupListModel *goalSeriesModel READ goalSeriesModel CONSTANT)
@@ -95,6 +96,7 @@ public:
     [[nodiscard]] Models::LookupListModel *pillarModel();
     [[nodiscard]] Models::LookupListModel *tagModel();
     [[nodiscard]] Models::LookupListModel *kindModel();
+    [[nodiscard]] Models::LookupListModel *outcomeModel();
     [[nodiscard]] Models::LookupListModel *channelModel();
     [[nodiscard]] Models::LookupListModel *contentSeriesModel();
     [[nodiscard]] Models::LookupListModel *goalSeriesModel();
@@ -170,7 +172,52 @@ public:
     Q_INVOKABLE bool contentHasDerivedItems(const QString &contentId) const;
     Q_INVOKABLE QVariantMap contentDetails(const QString &contentId) const;
     Q_INVOKABLE QVariantList contentSeriesOptions() const;
+    Q_INVOKABLE QVariantList contentOutcomeOptions() const;
     Q_INVOKABLE QVariantList publicationFanOutOptions(const QString &contentId) const;
+    Q_INVOKABLE QVariantList channelManagementItems() const;
+    Q_INVOKABLE QVariantMap channelDetails(const QString &channelId) const;
+    Q_INVOKABLE QVariantMap validateChannelKey(const QString &channelId, const QString &key) const;
+    Q_INVOKABLE bool saveChannel(const QString &channelId,
+                                 const QString &key,
+                                 const QString &displayName,
+                                 bool active);
+    Q_INVOKABLE bool saveChannelOrder(const QVariantList &orderedChannelIds);
+    Q_INVOKABLE bool deleteChannel(const QString &channelId);
+    Q_INVOKABLE QVariantList pillarManagementItems() const;
+    Q_INVOKABLE QVariantMap pillarDetails(const QString &pillarId) const;
+    Q_INVOKABLE QVariantMap validatePillarKey(const QString &pillarId, const QString &key) const;
+    Q_INVOKABLE bool savePillar(const QString &pillarId,
+                                const QString &key,
+                                const QString &displayName,
+                                bool active);
+    Q_INVOKABLE bool savePillarOrder(const QVariantList &orderedPillarIds);
+    Q_INVOKABLE bool deletePillar(const QString &pillarId);
+    Q_INVOKABLE QVariantList contentKindManagementItems() const;
+    Q_INVOKABLE QVariantMap contentKindDetails(const QString &contentKindId) const;
+    Q_INVOKABLE QVariantMap validateContentKindKey(const QString &contentKindId, const QString &key) const;
+    Q_INVOKABLE bool saveContentKind(const QString &contentKindId,
+                                     const QString &key,
+                                     const QString &displayName,
+                                     bool active);
+    Q_INVOKABLE bool saveContentKindOrder(const QVariantList &orderedContentKindIds);
+    Q_INVOKABLE bool deleteContentKind(const QString &contentKindId);
+    Q_INVOKABLE QVariantList outcomeManagementItems() const;
+    Q_INVOKABLE QVariantMap outcomeDetails(const QString &outcomeId) const;
+    Q_INVOKABLE QVariantMap validateOutcomeKey(const QString &outcomeId, const QString &key) const;
+    Q_INVOKABLE bool saveOutcome(const QString &outcomeId,
+                                 const QString &key,
+                                 const QString &displayName,
+                                 bool active);
+    Q_INVOKABLE bool saveOutcomeOrder(const QVariantList &orderedOutcomeIds);
+    Q_INVOKABLE bool deleteOutcome(const QString &outcomeId);
+    Q_INVOKABLE QVariantList contentStatusManagementItems() const;
+    Q_INVOKABLE QVariantMap contentStatusDetails(const QString &contentStatusId) const;
+    Q_INVOKABLE QVariantMap validateContentStatusKey(const QString &contentStatusId, const QString &key) const;
+    Q_INVOKABLE bool saveContentStatus(const QString &contentStatusId,
+                                       const QString &key,
+                                       const QString &info);
+    Q_INVOKABLE bool saveContentStatusOrder(const QVariantList &orderedContentStatusIds);
+    Q_INVOKABLE bool deleteContentStatus(const QString &contentStatusId);
     Q_INVOKABLE QVariantMap publicationDetails(const QString &publicationId) const;
     Q_INVOKABLE QVariantMap goalDetails(const QString &goalId) const;
     Q_INVOKABLE QVariantList goalScopeOptions(const QString &scopeType) const;
@@ -184,6 +231,7 @@ public:
                                    const QString &seriesId,
                                    const QString &kindId,
                                    const QString &pillarId,
+                                   const QString &outcomeId,
                                    int priority,
                                    const QString &scheduledAt,
                                    const QString &suggestedChannelId,
@@ -262,6 +310,7 @@ private:
     void refreshDashboard();
     void refreshClipboardHasText();
     void setStatusMessage(const QString &message);
+    [[nodiscard]] bool isValidLookupKey(const QString &key) const;
     bool createIdeaFromTextInternal(const QString &text, QString *errorMessage = nullptr);
     bool createInboxItemInternal(const QString &contentId,
                                  const QString &title,
@@ -311,6 +360,7 @@ private:
     Models::LookupListModel pillarModel_;
     Models::LookupListModel tagModel_;
     Models::LookupListModel kindModel_;
+    Models::LookupListModel outcomeModel_;
     Models::LookupListModel channelModel_;
     Models::LookupListModel contentSeriesModel_;
     Models::LookupListModel goalSeriesModel_;

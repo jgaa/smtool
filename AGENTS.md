@@ -10,8 +10,6 @@ Product design, workflow, and schema intent belong in the specs under [specs/](.
 
 ## Scope and Delivery Expectations
 
-* This project is a simple app intended to become usable quickly.
-* Optimize for a usable app early, without letting the codebase become sloppy.
 * The code is open source / GPLv3, so implementation quality matters.
 * Keep the architecture small, explicit, and maintainable. Do not overengineer.
 
@@ -50,8 +48,7 @@ Product design, workflow, and schema intent belong in the specs under [specs/](.
 
 ## Persistence and Runtime Rules
 
-* Production/default database storage should remain based on `QStandardPaths::AppDataLocation`.
-* The app currently also supports `--database-path` for explicit SQLite path override. Keep that unless there is a good reason to remove it.
+* Production/default database storage should remain based on `QStandardPaths::AppDataLocation` and app settings.
 * In sandboxed or CI-like environments, `--database-path /tmp/...` may be required because the normal app-data location may not be writable.
 
 ## Validation and Behavior Rules

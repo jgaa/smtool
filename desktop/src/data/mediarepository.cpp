@@ -90,6 +90,10 @@ std::vector<Domain::MediaItem> MediaRepository::listForOwner(const QString &owne
             .updatedAt = query.value(7).toDateTime(),
         });
     }
+    query.finish();
+    LOG_TRACE << "MediaRepository::listForOwner completed ownerColumn='"
+              << ownerColumn.toStdString() << "' ownerId='"
+              << ownerId.toStdString() << "' items=" << items.size();
     return items;
 }
 
@@ -112,6 +116,9 @@ bool MediaRepository::replaceForOwner(const QString &ownerColumn,
                   << (errorMessage != nullptr ? errorMessage->toStdString() : std::string{});
         return false;
     }
+    deleteQuery.finish();
+    LOG_TRACE << "MediaRepository::replaceForOwner delete finished for ownerId='"
+              << ownerId.toStdString() << "'";
 
     for (const auto &item : items) {
         LOG_DEBUG << "MediaRepository::replaceForOwner inserting media id='" << item.id.toStdString()
@@ -137,6 +144,10 @@ bool MediaRepository::replaceForOwner(const QString &ownerColumn,
                       << (errorMessage != nullptr ? errorMessage->toStdString() : std::string{});
             return false;
         }
+        insertQuery.finish();
+        LOG_TRACE << "MediaRepository::replaceForOwner insert finished mediaId='"
+                  << id.toStdString() << "' ownerId='"
+                  << ownerId.toStdString() << "'";
     }
 
     LOG_DEBUG << "MediaRepository::replaceForOwner completed for ownerId='" << ownerId.toStdString() << "'";

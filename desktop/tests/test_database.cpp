@@ -62,6 +62,33 @@ private slots:
     void disallowsAssigningContentToArchivedSeries();
     void deletesSeriesOnlyWhenUnused();
     void fanOutUsesChannelsAsAlternatives();
+    void channelCreateInsertsAtTop();
+    void channelEditsSyncManagedFanOutTemplates();
+    void channelKeyChangeFailsWhenBurstTemplateIsInUse();
+    void channelReorderPersists();
+    void channelDeleteFailsWhenReferenced();
+    void channelDeleteRemovesManagedTemplateAndClosesSortGap();
+    void pillarCreateInsertsAtTop();
+    void pillarReorderPersists();
+    void pillarDeleteFailsWhenReferenced();
+    void pillarDeleteClosesSortGap();
+    void contentKindCreateInsertsAtTop();
+    void contentKindReorderPersists();
+    void contentKindDeleteFailsWhenReferenced();
+    void contentKindDeleteClosesSortGap();
+    void contentKindRequiredKeyCannotChange();
+    void outcomeCreateInsertsAtTop();
+    void outcomeReorderPersists();
+    void outcomeDeleteFailsWhenReferenced();
+    void outcomeDeleteClosesSortGap();
+    void outcomeRequiredKeyCannotChange();
+    void contentStatusCreateInsertsAtTop();
+    void contentStatusReorderPersists();
+    void contentStatusUpdateChangesKeyAndInfo();
+    void contentStatusKeyChangeFailsWhenReferenced();
+    void contentStatusDeleteFailsWhenProtected();
+    void contentStatusDeleteClosesSortGap();
+    void existingDatabaseSkipsDefaultReseedOnReopen();
     void burstGenerationIsIdempotent();
     void burstGenerationSupportsSelectedAlternatives();
     void calendarShowsContentAndPublicationSchedules();
@@ -79,6 +106,7 @@ private slots:
     void preventsDeletingSystemOrReferencedStatuses();
     void deletesContentTree();
     void updatesContentFields();
+    void controllerUpdatesAndClearsContentOutcome();
     void normalizesAndCachesTags();
     void sortsInboxByPriorityThenCreatedAt();
     void sortsBoardByPriorityThenUpdatedAt();
@@ -159,6 +187,826 @@ void DatabaseTests::fanOutUsesChannelsAsAlternatives()
         }
     }
     QVERIFY(foundLinkedIn);
+}
+
+void DatabaseTests::channelCreateInsertsAtTop()
+{
+    SmTool::Data::Database database({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-channel-create"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto lookups = SmTool::Data::LookupsRepository{database.connection()};
+    const auto before = lookups.allLookups(QStringLiteral("channel"));
+    QVERIFY(!before.empty());
+
+    const auto createdId = lookups.createChannel({
+        .key = QStringLiteral("threads"),
+        .displayName = QStringLiteral("Threads"),
+        .description = {},
+        .sortOrder = 0,
+        .isActive = true,
+    }, &errorMessage);
+    QVERIFY2(!createdId.isEmpty(), qPrintable(errorMessage));
+
+    const auto after = lookups.allLookups(QStringLiteral("channel"));
+    QCOMPARE(after.size(), before.size() + 1);
+    QCOMPARE(after.front().id, createdId);
+    QCOMPARE(after.front().key, QStringLiteral("threads"));
+    QCOMPARE(after.front().sortOrder, 0);
+    QCOMPARE(after.at(1).id, before.front().id);
+    QCOMPARE(after.at(1).sortOrder, 1);
+}
+
+void DatabaseTests::channelEditsSyncManagedFanOutTemplates()
+{
+    SmTool::Data::Database database({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-channel-edit"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto lookups = SmTool::Data::LookupsRepository{database.connection()};
+    const auto youtubeId = lookups.lookupIdByKey(QStringLiteral("channel"), QStringLiteral("youtube"));
+    QVERIFY(!youtubeId.isEmpty());
+
+    const auto existing = lookups.lookupById(QStringLiteral("channel"), youtubeId);
+    QVERIFY(!existing.id.isEmpty());
+
+    QVERIFY2(lookups.updateChannel({
+        .id = existing.id,
+        .key = QStringLiteral("videos"),
+        .displayName = QStringLiteral("Videos"),
+        .description = existing.description,
+        .sortOrder = existing.sortOrder,
+        .isActive = false,
+    }, &errorMessage), qPrintable(errorMessage));
+
+    const auto updated = lookups.lookupById(QStringLiteral("channel"), youtubeId);
+    QCOMPARE(updated.key, QStringLiteral("videos"));
+    QCOMPARE(updated.displayName, QStringLiteral("Videos"));
+    QCOMPARE(updated.isActive, false);
+
+    QSqlQuery templateQuery{database.connection()};
+    templateQuery.prepare(QStringLiteral(
+        "SELECT display_name, is_active "
+        "FROM burst_template "
+        "WHERE key = 'fanout_videos'"));
+    QVERIFY2(templateQuery.exec(), qPrintable(templateQuery.lastError().text()));
+    QVERIFY(templateQuery.next());
+    QCOMPARE(templateQuery.value(0).toString(), QStringLiteral("Videos"));
+    QCOMPARE(templateQuery.value(1).toInt(), 0);
+
+    QSqlQuery oldTemplateQuery{database.connection()};
+    oldTemplateQuery.prepare(QStringLiteral(
+        "SELECT COUNT(*) FROM burst_template WHERE key = 'fanout_youtube'"));
+    QVERIFY2(oldTemplateQuery.exec(), qPrintable(oldTemplateQuery.lastError().text()));
+    QVERIFY(oldTemplateQuery.next());
+    QCOMPARE(oldTemplateQuery.value(0).toInt(), 0);
+}
+
+void DatabaseTests::channelKeyChangeFailsWhenBurstTemplateIsInUse()
+{
+    SmTool::Data::Database database({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-channel-key-in-use"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto lookups = SmTool::Data::LookupsRepository{database.connection()};
+    const auto linkedinId = lookups.lookupIdByKey(QStringLiteral("channel"), QStringLiteral("linkedin"));
+    const auto pillarId = lookups.lookupIdByKey(QStringLiteral("pillar"), QStringLiteral("tech"));
+    const auto kindId = lookups.lookupIdByKey(QStringLiteral("content_kind"), QStringLiteral("short_post"));
+    QVERIFY(!linkedinId.isEmpty());
+    QVERIFY(!pillarId.isEmpty());
+    QVERIFY(!kindId.isEmpty());
+
+    QSqlQuery insertQuery{database.connection()};
+    insertQuery.prepare(QStringLiteral(
+        "INSERT INTO content "
+        "(id, parent_id, burst_template_key, title, description, kind_id, pillar_id, status, priority, created_at, updated_at) "
+        "VALUES ('content-using-linkedin-template', NULL, 'fanout_linkedin', 'LinkedIn Post', '', :kind_id, :pillar_id, 'inbox', 0, datetime('now'), datetime('now'))"));
+    insertQuery.bindValue(":kind_id"_L1, kindId);
+    insertQuery.bindValue(":pillar_id"_L1, pillarId);
+    QVERIFY2(insertQuery.exec(), qPrintable(insertQuery.lastError().text()));
+
+    const auto existing = lookups.lookupById(QStringLiteral("channel"), linkedinId);
+    QVERIFY(!existing.id.isEmpty());
+
+    QVERIFY(!lookups.updateChannel({
+        .id = existing.id,
+        .key = QStringLiteral("linkedin_new"),
+        .displayName = existing.displayName,
+        .description = existing.description,
+        .sortOrder = existing.sortOrder,
+        .isActive = existing.isActive,
+    }, &errorMessage));
+    QVERIFY(errorMessage.contains(QStringLiteral("burst-generated content"), Qt::CaseInsensitive));
+}
+
+void DatabaseTests::channelReorderPersists()
+{
+    SmTool::Data::Database database({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-channel-reorder"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto lookups = SmTool::Data::LookupsRepository{database.connection()};
+    const auto channels = lookups.allLookups(QStringLiteral("channel"));
+    QVERIFY(channels.size() > 2);
+
+    QStringList reorderedIds;
+    reorderedIds.reserve(static_cast<qsizetype>(channels.size()));
+    reorderedIds.append(channels.back().id);
+    for (size_t index = 0; index + 1 < channels.size(); ++index) {
+        reorderedIds.append(channels.at(index).id);
+    }
+
+    QVERIFY2(lookups.reorderChannels(reorderedIds, &errorMessage), qPrintable(errorMessage));
+
+    const auto reordered = lookups.allLookups(QStringLiteral("channel"));
+    QCOMPARE(reordered.front().id, channels.back().id);
+    QCOMPARE(reordered.front().sortOrder, 0);
+    QCOMPARE(reordered.back().sortOrder, static_cast<int>(reordered.size()) - 1);
+}
+
+void DatabaseTests::channelDeleteFailsWhenReferenced()
+{
+    SmTool::Data::Database database({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-channel-delete-fail"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto lookups = SmTool::Data::LookupsRepository{database.connection()};
+    const auto linkedinId = lookups.lookupIdByKey(QStringLiteral("channel"), QStringLiteral("linkedin"));
+    const auto pillarId = lookups.lookupIdByKey(QStringLiteral("pillar"), QStringLiteral("tech"));
+    const auto kindId = lookups.lookupIdByKey(QStringLiteral("content_kind"), QStringLiteral("short_post"));
+    QVERIFY(!linkedinId.isEmpty());
+
+    QSqlQuery insertQuery{database.connection()};
+    insertQuery.prepare(QStringLiteral(
+        "INSERT INTO content "
+        "(id, title, description, kind_id, pillar_id, suggested_channel_id, status, priority, created_at, updated_at) "
+        "VALUES ('content-with-channel', 'LinkedIn idea', '', :kind_id, :pillar_id, :channel_id, 'inbox', 0, datetime('now'), datetime('now'))"));
+    insertQuery.bindValue(":kind_id"_L1, kindId);
+    insertQuery.bindValue(":pillar_id"_L1, pillarId);
+    insertQuery.bindValue(":channel_id"_L1, linkedinId);
+    QVERIFY2(insertQuery.exec(), qPrintable(insertQuery.lastError().text()));
+
+    QVERIFY(!lookups.deleteChannel(linkedinId, &errorMessage));
+    QVERIFY(errorMessage.contains(QStringLiteral("content suggestions"), Qt::CaseInsensitive));
+}
+
+void DatabaseTests::channelDeleteRemovesManagedTemplateAndClosesSortGap()
+{
+    SmTool::Data::Database database({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-channel-delete-success"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto lookups = SmTool::Data::LookupsRepository{database.connection()};
+    const auto channels = lookups.allLookups(QStringLiteral("channel"));
+    QVERIFY(channels.size() > 3);
+
+    const auto removable = channels.at(2);
+    QVERIFY2(lookups.deleteChannel(removable.id, &errorMessage), qPrintable(errorMessage));
+
+    const auto after = lookups.allLookups(QStringLiteral("channel"));
+    QCOMPARE(after.size(), channels.size() - 1);
+    for (const auto &channel : after) {
+        QVERIFY(channel.id != removable.id);
+    }
+    for (int index = 0; index < static_cast<int>(after.size()); ++index) {
+        QCOMPARE(after.at(index).sortOrder, index);
+    }
+
+    QSqlQuery templateQuery{database.connection()};
+    templateQuery.prepare(QStringLiteral("SELECT COUNT(*) FROM burst_template WHERE key = :key"));
+    templateQuery.bindValue(":key"_L1, QStringLiteral("fanout_%1").arg(removable.key));
+    QVERIFY2(templateQuery.exec(), qPrintable(templateQuery.lastError().text()));
+    QVERIFY(templateQuery.next());
+    QCOMPARE(templateQuery.value(0).toInt(), 0);
+}
+
+void DatabaseTests::pillarCreateInsertsAtTop()
+{
+    SmTool::Data::Database database({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-pillar-create"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto lookups = SmTool::Data::LookupsRepository{database.connection()};
+    const auto before = lookups.allLookups(QStringLiteral("pillar"));
+    QVERIFY(before.size() >= 2);
+
+    const auto createdId = lookups.createPillar({
+        .key = QStringLiteral("fresh_pillar"),
+        .displayName = QStringLiteral("Fresh Pillar"),
+        .description = {},
+        .sortOrder = 0,
+        .isActive = true,
+    }, &errorMessage);
+    QVERIFY2(!createdId.isEmpty(), qPrintable(errorMessage));
+
+    const auto after = lookups.allLookups(QStringLiteral("pillar"));
+    QCOMPARE(after.size(), before.size() + 1);
+    QCOMPARE(after.front().id, createdId);
+    QCOMPARE(after.front().sortOrder, 0);
+    QCOMPARE(after.at(1).id, before.front().id);
+}
+
+void DatabaseTests::pillarReorderPersists()
+{
+    SmTool::Data::Database database({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-pillar-reorder"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto lookups = SmTool::Data::LookupsRepository{database.connection()};
+    const auto pillars = lookups.allLookups(QStringLiteral("pillar"));
+    QVERIFY(pillars.size() > 2);
+
+    QStringList reorderedIds;
+    reorderedIds.reserve(static_cast<qsizetype>(pillars.size()));
+    reorderedIds.append(pillars.back().id);
+    for (size_t index = 0; index + 1 < pillars.size(); ++index) {
+        reorderedIds.append(pillars.at(index).id);
+    }
+
+    QVERIFY2(lookups.reorderPillars(reorderedIds, &errorMessage), qPrintable(errorMessage));
+
+    const auto reordered = lookups.allLookups(QStringLiteral("pillar"));
+    QCOMPARE(reordered.front().id, pillars.back().id);
+    QCOMPARE(reordered.front().sortOrder, 0);
+    QCOMPARE(reordered.back().sortOrder, static_cast<int>(reordered.size()) - 1);
+}
+
+void DatabaseTests::pillarDeleteFailsWhenReferenced()
+{
+    SmTool::Data::Database database({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-pillar-delete-fail"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto lookups = SmTool::Data::LookupsRepository{database.connection()};
+    const auto pillarId = lookups.lookupIdByKey(QStringLiteral("pillar"), QStringLiteral("tech"));
+    const auto kindId = lookups.lookupIdByKey(QStringLiteral("content_kind"), QStringLiteral("short_post"));
+    QVERIFY(!pillarId.isEmpty());
+
+    QSqlQuery insertQuery{database.connection()};
+    insertQuery.prepare(QStringLiteral(
+        "INSERT INTO content "
+        "(id, title, description, kind_id, pillar_id, status, priority, created_at, updated_at) "
+        "VALUES ('content-with-pillar', 'Tech idea', '', :kind_id, :pillar_id, 'inbox', 0, datetime('now'), datetime('now'))"));
+    insertQuery.bindValue(":kind_id"_L1, kindId);
+    insertQuery.bindValue(":pillar_id"_L1, pillarId);
+    QVERIFY2(insertQuery.exec(), qPrintable(insertQuery.lastError().text()));
+
+    QVERIFY(!lookups.deletePillar(pillarId, &errorMessage));
+    QVERIFY(errorMessage.contains(QStringLiteral("content items"), Qt::CaseInsensitive));
+}
+
+void DatabaseTests::pillarDeleteClosesSortGap()
+{
+    SmTool::Data::Database database({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-pillar-delete-success"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto lookups = SmTool::Data::LookupsRepository{database.connection()};
+    const auto createdId = lookups.createPillar({
+        .key = QStringLiteral("removable_pillar"),
+        .displayName = QStringLiteral("Removable Pillar"),
+        .description = {},
+        .sortOrder = 0,
+        .isActive = true,
+    }, &errorMessage);
+    QVERIFY2(!createdId.isEmpty(), qPrintable(errorMessage));
+
+    const auto pillars = lookups.allLookups(QStringLiteral("pillar"));
+    QVERIFY2(lookups.deletePillar(createdId, &errorMessage), qPrintable(errorMessage));
+
+    const auto after = lookups.allLookups(QStringLiteral("pillar"));
+    QCOMPARE(after.size(), pillars.size() - 1);
+    for (const auto &pillar : after) {
+        QVERIFY(pillar.id != createdId);
+    }
+    for (int index = 0; index < static_cast<int>(after.size()); ++index) {
+        QCOMPARE(after.at(index).sortOrder, index);
+    }
+}
+
+void DatabaseTests::contentKindCreateInsertsAtTop()
+{
+    SmTool::Data::Database database({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-content-kind-create"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto lookups = SmTool::Data::LookupsRepository{database.connection()};
+    const auto before = lookups.allLookups(QStringLiteral("content_kind"));
+    QVERIFY(before.size() >= 2);
+
+    const auto createdId = lookups.createContentKind({
+        .key = QStringLiteral("custom_kind"),
+        .displayName = QStringLiteral("Custom Kind"),
+        .description = {},
+        .sortOrder = 0,
+        .isActive = true,
+    }, &errorMessage);
+    QVERIFY2(!createdId.isEmpty(), qPrintable(errorMessage));
+
+    const auto after = lookups.allLookups(QStringLiteral("content_kind"));
+    QCOMPARE(after.size(), before.size() + 1);
+    QCOMPARE(after.front().id, createdId);
+    QCOMPARE(after.front().sortOrder, 0);
+    QCOMPARE(after.at(1).id, before.front().id);
+}
+
+void DatabaseTests::contentKindReorderPersists()
+{
+    SmTool::Data::Database database({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-content-kind-reorder"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto lookups = SmTool::Data::LookupsRepository{database.connection()};
+    const auto contentKinds = lookups.allLookups(QStringLiteral("content_kind"));
+    QVERIFY(contentKinds.size() > 2);
+
+    QStringList reorderedIds;
+    reorderedIds.reserve(static_cast<qsizetype>(contentKinds.size()));
+    reorderedIds.append(contentKinds.back().id);
+    for (size_t index = 0; index + 1 < contentKinds.size(); ++index) {
+        reorderedIds.append(contentKinds.at(index).id);
+    }
+
+    QVERIFY2(lookups.reorderContentKinds(reorderedIds, &errorMessage), qPrintable(errorMessage));
+
+    const auto reordered = lookups.allLookups(QStringLiteral("content_kind"));
+    QCOMPARE(reordered.front().id, contentKinds.back().id);
+    QCOMPARE(reordered.front().sortOrder, 0);
+    QCOMPARE(reordered.back().sortOrder, static_cast<int>(reordered.size()) - 1);
+}
+
+void DatabaseTests::contentKindDeleteFailsWhenReferenced()
+{
+    SmTool::Data::Database database({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-content-kind-delete-fail"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto lookups = SmTool::Data::LookupsRepository{database.connection()};
+    const auto contentKindId = lookups.lookupIdByKey(QStringLiteral("content_kind"), QStringLiteral("short_post"));
+    QVERIFY(!contentKindId.isEmpty());
+
+    QVERIFY(!lookups.deleteContentKind(contentKindId, &errorMessage));
+    QVERIFY(errorMessage.contains(QStringLiteral("burst templates"), Qt::CaseInsensitive)
+             || errorMessage.contains(QStringLiteral("content items"), Qt::CaseInsensitive));
+}
+
+void DatabaseTests::contentKindDeleteClosesSortGap()
+{
+    SmTool::Data::Database database({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-content-kind-delete-success"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto lookups = SmTool::Data::LookupsRepository{database.connection()};
+    const auto createdId = lookups.createContentKind({
+        .key = QStringLiteral("removable_kind"),
+        .displayName = QStringLiteral("Removable Kind"),
+        .description = {},
+        .sortOrder = 0,
+        .isActive = true,
+    }, &errorMessage);
+    QVERIFY2(!createdId.isEmpty(), qPrintable(errorMessage));
+
+    const auto contentKinds = lookups.allLookups(QStringLiteral("content_kind"));
+    QVERIFY2(lookups.deleteContentKind(createdId, &errorMessage), qPrintable(errorMessage));
+
+    const auto after = lookups.allLookups(QStringLiteral("content_kind"));
+    QCOMPARE(after.size(), contentKinds.size() - 1);
+    for (const auto &contentKind : after) {
+        QVERIFY(contentKind.id != createdId);
+    }
+    for (int index = 0; index < static_cast<int>(after.size()); ++index) {
+        QCOMPARE(after.at(index).sortOrder, index);
+    }
+}
+
+void DatabaseTests::contentKindRequiredKeyCannotChange()
+{
+    SmTool::Data::Database database({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-content-kind-key-guard"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto lookups = SmTool::Data::LookupsRepository{database.connection()};
+    const auto contentKindId = lookups.lookupIdByKey(QStringLiteral("content_kind"), QStringLiteral("short_post"));
+    QVERIFY(!contentKindId.isEmpty());
+
+    const auto existing = lookups.lookupById(QStringLiteral("content_kind"), contentKindId);
+    QVERIFY(!existing.id.isEmpty());
+
+    QVERIFY(!lookups.updateContentKind({
+        .id = existing.id,
+        .key = QStringLiteral("micro_post"),
+        .displayName = existing.displayName,
+        .description = existing.description,
+        .sortOrder = existing.sortOrder,
+        .isActive = existing.isActive,
+    }, &errorMessage));
+    QVERIFY(errorMessage.contains(QStringLiteral("built-in fan-out templates"), Qt::CaseInsensitive));
+}
+
+void DatabaseTests::outcomeCreateInsertsAtTop()
+{
+    SmTool::Data::Database database({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-outcome-create"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto lookups = SmTool::Data::LookupsRepository{database.connection()};
+    const auto before = lookups.allLookups(QStringLiteral("outcome"));
+    QVERIFY(before.size() >= 2);
+
+    const auto createdId = lookups.createOutcome({
+        .key = QStringLiteral("retention"),
+        .displayName = QStringLiteral("Retention"),
+        .description = {},
+        .sortOrder = 0,
+        .isActive = true,
+    }, &errorMessage);
+    QVERIFY2(!createdId.isEmpty(), qPrintable(errorMessage));
+
+    const auto after = lookups.allLookups(QStringLiteral("outcome"));
+    QCOMPARE(after.size(), before.size() + 1);
+    QCOMPARE(after.front().id, createdId);
+    QCOMPARE(after.front().sortOrder, 0);
+    QCOMPARE(after.at(1).id, before.front().id);
+}
+
+void DatabaseTests::outcomeReorderPersists()
+{
+    SmTool::Data::Database database({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-outcome-reorder"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto lookups = SmTool::Data::LookupsRepository{database.connection()};
+    const auto outcomes = lookups.allLookups(QStringLiteral("outcome"));
+    QVERIFY(outcomes.size() > 2);
+
+    QStringList reorderedIds;
+    reorderedIds.reserve(static_cast<qsizetype>(outcomes.size()));
+    reorderedIds.append(outcomes.back().id);
+    for (size_t index = 0; index + 1 < outcomes.size(); ++index) {
+        reorderedIds.append(outcomes.at(index).id);
+    }
+
+    QVERIFY2(lookups.reorderOutcomes(reorderedIds, &errorMessage), qPrintable(errorMessage));
+
+    const auto reordered = lookups.allLookups(QStringLiteral("outcome"));
+    QCOMPARE(reordered.front().id, outcomes.back().id);
+    QCOMPARE(reordered.front().sortOrder, 0);
+    QCOMPARE(reordered.back().sortOrder, static_cast<int>(reordered.size()) - 1);
+}
+
+void DatabaseTests::outcomeDeleteFailsWhenReferenced()
+{
+    SmTool::Data::Database database({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-outcome-delete-fail"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto lookups = SmTool::Data::LookupsRepository{database.connection()};
+    const auto outcomeId = lookups.lookupIdByKey(QStringLiteral("outcome"), QStringLiteral("authority"));
+    QVERIFY(!outcomeId.isEmpty());
+
+    QVERIFY(!lookups.deleteOutcome(outcomeId, &errorMessage));
+    QVERIFY(errorMessage.contains(QStringLiteral("burst templates"), Qt::CaseInsensitive)
+             || errorMessage.contains(QStringLiteral("content items"), Qt::CaseInsensitive));
+}
+
+void DatabaseTests::outcomeDeleteClosesSortGap()
+{
+    SmTool::Data::Database database({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-outcome-delete-success"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto lookups = SmTool::Data::LookupsRepository{database.connection()};
+    const auto createdId = lookups.createOutcome({
+        .key = QStringLiteral("removable_outcome"),
+        .displayName = QStringLiteral("Removable Outcome"),
+        .description = {},
+        .sortOrder = 0,
+        .isActive = true,
+    }, &errorMessage);
+    QVERIFY2(!createdId.isEmpty(), qPrintable(errorMessage));
+
+    const auto outcomes = lookups.allLookups(QStringLiteral("outcome"));
+    QVERIFY2(lookups.deleteOutcome(createdId, &errorMessage), qPrintable(errorMessage));
+
+    const auto after = lookups.allLookups(QStringLiteral("outcome"));
+    QCOMPARE(after.size(), outcomes.size() - 1);
+    for (const auto &outcome : after) {
+        QVERIFY(outcome.id != createdId);
+    }
+    for (int index = 0; index < static_cast<int>(after.size()); ++index) {
+        QCOMPARE(after.at(index).sortOrder, index);
+    }
+}
+
+void DatabaseTests::outcomeRequiredKeyCannotChange()
+{
+    SmTool::Data::Database database({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-outcome-key-guard"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto lookups = SmTool::Data::LookupsRepository{database.connection()};
+    const auto outcomeId = lookups.lookupIdByKey(QStringLiteral("outcome"), QStringLiteral("authority"));
+    QVERIFY(!outcomeId.isEmpty());
+
+    const auto existing = lookups.lookupById(QStringLiteral("outcome"), outcomeId);
+    QVERIFY(!existing.id.isEmpty());
+
+    QVERIFY(!lookups.updateOutcome({
+        .id = existing.id,
+        .key = QStringLiteral("expertise"),
+        .displayName = existing.displayName,
+        .description = existing.description,
+        .sortOrder = existing.sortOrder,
+        .isActive = existing.isActive,
+    }, &errorMessage));
+    QVERIFY(errorMessage.contains(QStringLiteral("built-in fan-out templates"), Qt::CaseInsensitive));
+}
+
+void DatabaseTests::contentStatusCreateInsertsAtTop()
+{
+    SmTool::Data::Database database({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-content-status-create"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto lookups = SmTool::Data::LookupsRepository{database.connection()};
+    const auto before = lookups.contentStatuses();
+    QVERIFY(before.size() >= 2);
+
+    const auto createdId = lookups.createContentStatus({
+        .id = QStringLiteral("awaiting_review"),
+        .info = QStringLiteral("Custom review stage."),
+        .sortOrder = 0,
+        .isSystem = false,
+    }, &errorMessage);
+    QVERIFY2(!createdId.isEmpty(), qPrintable(errorMessage));
+
+    const auto after = lookups.contentStatuses();
+    QCOMPARE(after.size(), before.size() + 1);
+    QCOMPARE(after.front().id, createdId);
+    QCOMPARE(after.front().sortOrder, 0);
+    QCOMPARE(after.front().info, QStringLiteral("Custom review stage."));
+    QCOMPARE(after.at(1).id, before.front().id);
+}
+
+void DatabaseTests::contentStatusReorderPersists()
+{
+    SmTool::Data::Database database({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-content-status-reorder"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto lookups = SmTool::Data::LookupsRepository{database.connection()};
+    const auto statuses = lookups.contentStatuses();
+    QVERIFY(statuses.size() > 2);
+
+    QStringList reorderedIds;
+    reorderedIds.reserve(static_cast<qsizetype>(statuses.size()));
+    reorderedIds.append(statuses.back().id);
+    for (size_t index = 0; index + 1 < statuses.size(); ++index) {
+        reorderedIds.append(statuses.at(index).id);
+    }
+
+    QVERIFY2(lookups.reorderContentStatuses(reorderedIds, &errorMessage), qPrintable(errorMessage));
+
+    const auto reordered = lookups.contentStatuses();
+    QCOMPARE(reordered.front().id, statuses.back().id);
+    QCOMPARE(reordered.front().sortOrder, 0);
+    QCOMPARE(reordered.back().sortOrder, static_cast<int>(reordered.size()) - 1);
+}
+
+void DatabaseTests::contentStatusUpdateChangesKeyAndInfo()
+{
+    SmTool::Data::Database database({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-content-status-update"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto lookups = SmTool::Data::LookupsRepository{database.connection()};
+    const auto createdId = lookups.createContentStatus({
+        .id = QStringLiteral("needs_review"),
+        .info = QStringLiteral("Initial text."),
+        .sortOrder = 0,
+        .isSystem = false,
+    }, &errorMessage);
+    QVERIFY2(!createdId.isEmpty(), qPrintable(errorMessage));
+
+    QVERIFY2(lookups.updateContentStatus(createdId, {
+        .id = QStringLiteral("needs_handoff"),
+        .info = QStringLiteral("Updated text for a longer workflow description."),
+        .sortOrder = 0,
+        .isSystem = false,
+    }, &errorMessage), qPrintable(errorMessage));
+
+    const auto updated = lookups.contentStatusById(QStringLiteral("needs_handoff"));
+    QCOMPARE(updated.id, QStringLiteral("needs_handoff"));
+    QCOMPARE(updated.info, QStringLiteral("Updated text for a longer workflow description."));
+    QVERIFY(!updated.isSystem);
+    QVERIFY(lookups.contentStatusById(createdId).id.isEmpty());
+}
+
+void DatabaseTests::contentStatusKeyChangeFailsWhenReferenced()
+{
+    SmTool::Data::Database database({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-content-status-key-change-guard"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto lookups = SmTool::Data::LookupsRepository{database.connection()};
+    const auto createdId = lookups.createContentStatus({
+        .id = QStringLiteral("queued_for_approval"),
+        .info = QStringLiteral("Queued status."),
+        .sortOrder = 0,
+        .isSystem = false,
+    }, &errorMessage);
+    QVERIFY2(!createdId.isEmpty(), qPrintable(errorMessage));
+
+    const auto pillarId = lookups.lookupIdByKey(QStringLiteral("pillar"), QStringLiteral("tech"));
+    const auto kindId = lookups.lookupIdByKey(QStringLiteral("content_kind"), QStringLiteral("short_post"));
+
+    QSqlQuery insertQuery{database.connection()};
+    insertQuery.prepare(QStringLiteral(
+        "INSERT INTO content "
+        "(id, title, description, kind_id, pillar_id, status, priority, created_at, updated_at) "
+        "VALUES ('content-with-custom-status', 'Queued item', '', :kind_id, :pillar_id, :status, 0, datetime('now'), datetime('now'))"));
+    insertQuery.bindValue(":kind_id"_L1, kindId);
+    insertQuery.bindValue(":pillar_id"_L1, pillarId);
+    insertQuery.bindValue(":status"_L1, createdId);
+    QVERIFY2(insertQuery.exec(), qPrintable(insertQuery.lastError().text()));
+
+    QVERIFY(!lookups.updateContentStatus(createdId, {
+        .id = QStringLiteral("approval_queue"),
+        .info = QStringLiteral("Renamed"),
+        .sortOrder = 0,
+        .isSystem = false,
+    }, &errorMessage));
+    QVERIFY(errorMessage.contains(QStringLiteral("content items"), Qt::CaseInsensitive));
+}
+
+void DatabaseTests::contentStatusDeleteFailsWhenProtected()
+{
+    SmTool::Data::Database database({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-content-status-delete-guards"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto lookups = SmTool::Data::LookupsRepository{database.connection()};
+
+    QVERIFY(!lookups.deleteContentStatus(QStringLiteral("inbox"), &errorMessage));
+    QVERIFY(errorMessage.contains(QStringLiteral("system status"), Qt::CaseInsensitive));
+
+    const auto createdId = lookups.createContentStatus({
+        .id = QStringLiteral("blocked_external"),
+        .info = QStringLiteral("Blocked on someone else."),
+        .sortOrder = 0,
+        .isSystem = false,
+    }, &errorMessage);
+    QVERIFY2(!createdId.isEmpty(), qPrintable(errorMessage));
+
+    const auto pillarId = lookups.lookupIdByKey(QStringLiteral("pillar"), QStringLiteral("tech"));
+    const auto kindId = lookups.lookupIdByKey(QStringLiteral("content_kind"), QStringLiteral("short_post"));
+
+    QSqlQuery insertQuery{database.connection()};
+    insertQuery.prepare(QStringLiteral(
+        "INSERT INTO content "
+        "(id, title, description, kind_id, pillar_id, status, priority, created_at, updated_at) "
+        "VALUES ('content-with-protected-status', 'Blocked item', '', :kind_id, :pillar_id, :status, 0, datetime('now'), datetime('now'))"));
+    insertQuery.bindValue(":kind_id"_L1, kindId);
+    insertQuery.bindValue(":pillar_id"_L1, pillarId);
+    insertQuery.bindValue(":status"_L1, createdId);
+    QVERIFY2(insertQuery.exec(), qPrintable(insertQuery.lastError().text()));
+
+    QVERIFY(!lookups.deleteContentStatus(createdId, &errorMessage));
+    QVERIFY(errorMessage.contains(QStringLiteral("content items"), Qt::CaseInsensitive));
+}
+
+void DatabaseTests::contentStatusDeleteClosesSortGap()
+{
+    SmTool::Data::Database database({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-content-status-delete-success"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto lookups = SmTool::Data::LookupsRepository{database.connection()};
+    const auto createdId = lookups.createContentStatus({
+        .id = QStringLiteral("removable_status"),
+        .info = QStringLiteral("Status to remove."),
+        .sortOrder = 0,
+        .isSystem = false,
+    }, &errorMessage);
+    QVERIFY2(!createdId.isEmpty(), qPrintable(errorMessage));
+
+    const auto statuses = lookups.contentStatuses();
+    QVERIFY2(lookups.deleteContentStatus(createdId, &errorMessage), qPrintable(errorMessage));
+
+    const auto after = lookups.contentStatuses();
+    QCOMPARE(after.size(), statuses.size() - 1);
+    for (const auto &status : after) {
+        QVERIFY(status.id != createdId);
+    }
+    for (int index = 0; index < static_cast<int>(after.size()); ++index) {
+        QCOMPARE(after.at(index).sortOrder, index);
+    }
+}
+
+void DatabaseTests::existingDatabaseSkipsDefaultReseedOnReopen()
+{
+    const auto databasePath = createTempDatabasePath();
+    SmTool::Data::Database database({
+        .databaseFilePath = databasePath,
+        .connectionName = QStringLiteral("test-reseed-content-kind"),
+    });
+    QString errorMessage;
+    QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+
+    QSqlQuery renameQuery{database.connection()};
+    renameQuery.prepare(QStringLiteral("UPDATE content_kind SET key = 'short_post_legacy' WHERE key = 'short_post'"));
+    QVERIFY2(renameQuery.exec(), qPrintable(renameQuery.lastError().text()));
+    database.connection().close();
+
+    SmTool::Data::Database reopened({
+        .databaseFilePath = databasePath,
+        .connectionName = QStringLiteral("test-reseed-content-kind-reopen"),
+    });
+    QVERIFY2(reopened.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto lookups = SmTool::Data::LookupsRepository{reopened.connection()};
+    const auto recreatedId = lookups.lookupIdByKey(QStringLiteral("content_kind"), QStringLiteral("short_post"));
+    QVERIFY(recreatedId.isEmpty());
+    const auto preservedId = lookups.lookupIdByKey(QStringLiteral("content_kind"), QStringLiteral("short_post_legacy"));
+    QVERIFY(!preservedId.isEmpty());
 }
 
 void DatabaseTests::createsGoalTablesAndAppliesLatestMigration()
@@ -1005,6 +1853,7 @@ void DatabaseTests::updatesContentFields()
     const auto otherPillarId = lookups.lookupIdByKey(QStringLiteral("pillar"), QStringLiteral("product"));
     const auto kindId = lookups.lookupIdByKey(QStringLiteral("content_kind"), QStringLiteral("idea"));
     const auto otherKindId = lookups.lookupIdByKey(QStringLiteral("content_kind"), QStringLiteral("blog_post"));
+    const auto outcomeId = lookups.lookupIdByKey(QStringLiteral("outcome"), QStringLiteral("trust"));
     const auto channelId = lookups.lookupIdByKey(QStringLiteral("channel"), QStringLiteral("linkedin"));
     const auto contentId = contentRepository.create({
         .title = QStringLiteral("Original"),
@@ -1024,6 +1873,7 @@ void DatabaseTests::updatesContentFields()
     item.tags = QStringLiteral("#Second; first\tinvalid/tag second");
     item.kindId = otherKindId;
     item.pillarId = otherPillarId;
+    item.outcomeId = outcomeId;
     item.suggestedChannelId = channelId;
     item.priority = 77;
     item.status = QStringLiteral("reviewing");
@@ -1036,10 +1886,80 @@ void DatabaseTests::updatesContentFields()
     QCOMPARE(updated.tags, QStringLiteral("first second"));
     QCOMPARE(updated.kindId, otherKindId);
     QCOMPARE(updated.pillarId, otherPillarId);
+    QCOMPARE(updated.outcomeId, outcomeId);
     QCOMPARE(updated.suggestedChannelId, channelId);
     QCOMPARE(updated.priority, 77);
     QCOMPARE(updated.status, QStringLiteral("reviewing"));
     QCOMPARE(updated.scheduledAt, item.scheduledAt);
+}
+
+void DatabaseTests::controllerUpdatesAndClearsContentOutcome()
+{
+    SmTool::App::AppController controller({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-controller-content-outcome"),
+    });
+    QString errorMessage;
+    QVERIFY2(controller.initialize(&errorMessage), qPrintable(errorMessage));
+
+    const auto pillarOptions = controller.pillarModel()->rowCount() > 0;
+    QVERIFY(pillarOptions);
+    const auto pillarId = controller.pillarModel()->data(controller.pillarModel()->index(0, 0),
+                                                         SmTool::Models::LookupListModel::IdRole).toString();
+    const auto outcomeOptions = controller.contentOutcomeOptions();
+    QVERIFY(outcomeOptions.size() > 1);
+    const auto outcomeId = outcomeOptions.at(1).toMap().value(QStringLiteral("lookupId")).toString();
+
+    QVERIFY(controller.createInboxItem(QStringLiteral("Controller item"),
+                                       QStringLiteral("Outcome test"),
+                                       QStringLiteral("#qt"),
+                                       pillarId,
+                                       QString{},
+                                       5,
+                                       QString{},
+                                       QString{},
+                                       {},
+                                       {},
+                                       false));
+
+    QCOMPARE(controller.inboxModel()->rowCount(), 1);
+    const auto contentId = controller.inboxModel()->data(controller.inboxModel()->index(0, 0),
+                                                         SmTool::Models::ContentListModel::IdRole).toString();
+    QVERIFY(!contentId.isEmpty());
+
+    QVERIFY(controller.updateContent(contentId,
+                                     QStringLiteral("Controller item"),
+                                     QStringLiteral("Outcome set"),
+                                     QStringLiteral("#qt"),
+                                     QString{},
+                                     QString{},
+                                     pillarId,
+                                     outcomeId,
+                                     5,
+                                     QString{},
+                                     QString{},
+                                     QStringLiteral("inbox"),
+                                     {},
+                                     {},
+                                     false));
+    QCOMPARE(controller.contentDetails(contentId).value(QStringLiteral("outcomeId")).toString(), outcomeId);
+
+    QVERIFY(controller.updateContent(contentId,
+                                     QStringLiteral("Controller item"),
+                                     QStringLiteral("Outcome cleared"),
+                                     QStringLiteral("#qt"),
+                                     QString{},
+                                     QString{},
+                                     pillarId,
+                                     QString{},
+                                     5,
+                                     QString{},
+                                     QString{},
+                                     QStringLiteral("inbox"),
+                                     {},
+                                     {},
+                                     false));
+    QVERIFY(controller.contentDetails(contentId).value(QStringLiteral("outcomeId")).toString().isEmpty());
 }
 
 void DatabaseTests::normalizesAndCachesTags()

@@ -29,6 +29,7 @@ public:
 private:
     void close();
     bool open(QString *errorMessage);
+    bool configurePragmas(QString *errorMessage);
     bool enableForeignKeys(QString *errorMessage);
     bool ensureMigrationTable(QString *errorMessage);
     bool applyMigrations(QString *errorMessage);
@@ -39,6 +40,7 @@ private:
 
     Options options_;
     QString connectionName_;
+    bool openedNewDatabase_ = false;
 };
 
 } // namespace SmTool::Data
