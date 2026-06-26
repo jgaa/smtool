@@ -373,6 +373,7 @@ bool AppController::importTransferredIdeas(const QVariantList &items, int *impor
                                     defaultContentPriority_,
                                     {},
                                     {},
+                                    QStringLiteral("inbox"),
                                     {},
                                     {},
                                     false)) {
@@ -927,7 +928,15 @@ bool AppController::createIdeaFromTextInternal(const QString &text, QString *err
     }
 
     LOG_INFO << "Creating inbox idea from text with title '" << title.toStdString() << "'";
-    return createInboxItem(title, trimmed, {}, pillars.front().id, {}, defaultContentPriority_, {}, {});
+    return createInboxItem(title,
+                           trimmed,
+                           {},
+                           pillars.front().id,
+                           {},
+                           defaultContentPriority_,
+                           {},
+                           {},
+                           QStringLiteral("inbox"));
 }
 QVariantMap AppController::contentDetails(const QString &contentId) const
 {
@@ -2539,6 +2548,7 @@ bool AppController::createInboxItem(const QString &title,
                                     int priority,
                                     const QString &scheduledAt,
                                     const QString &suggestedChannelId,
+                                    const QString &status,
                                     const QVariantList &mediaItems,
                                     const QString &mediaDataDir,
                                     bool fetchUrlTitles)
@@ -2552,6 +2562,7 @@ bool AppController::createInboxItem(const QString &title,
                                    priority,
                                    scheduledAt,
                                    suggestedChannelId,
+                                   status,
                                    mediaItems,
                                    mediaDataDir,
                                    fetchUrlTitles);
@@ -2566,6 +2577,7 @@ bool AppController::createInboxItemInternal(const QString &contentId,
                                             int priority,
                                             const QString &scheduledAt,
                                             const QString &suggestedChannelId,
+                                            const QString &status,
                                             const QVariantList &mediaItems,
                                             const QString &mediaDataDir,
                                             bool fetchUrlTitles)
@@ -2600,7 +2612,7 @@ bool AppController::createInboxItemInternal(const QString &contentId,
         .kindId = ideaKindId,
         .pillarId = pillarId,
         .suggestedChannelId = suggestedChannelId,
-        .status = QStringLiteral("inbox"),
+        .status = status.trimmed().isEmpty() ? QStringLiteral("inbox") : status.trimmed(),
         .priority = priority,
         .scheduledAt = scheduled,
         .createdAt = QDateTime::currentDateTimeUtc(),

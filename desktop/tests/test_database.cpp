@@ -107,6 +107,7 @@ private slots:
     void deletesContentTree();
     void updatesContentFields();
     void controllerUpdatesAndClearsContentOutcome();
+    void controllerCreateInboxItemPreservesSelectedStatus();
     void normalizesAndCachesTags();
     void sortsInboxByPriorityThenCreatedAt();
     void sortsBoardByPriorityThenUpdatedAt();
@@ -1918,6 +1919,7 @@ void DatabaseTests::controllerUpdatesAndClearsContentOutcome()
                                        5,
                                        QString{},
                                        QString{},
+                                       QStringLiteral("inbox"),
                                        {},
                                        {},
                                        false));
@@ -1960,6 +1962,44 @@ void DatabaseTests::controllerUpdatesAndClearsContentOutcome()
                                      {},
                                      false));
     QVERIFY(controller.contentDetails(contentId).value(QStringLiteral("outcomeId")).toString().isEmpty());
+}
+
+void DatabaseTests::controllerCreateInboxItemPreservesSelectedStatus()
+{
+    SmTool::App::AppController controller({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-controller-create-status"),
+    });
+    QString errorMessage;
+    QVERIFY2(controller.initialize(&errorMessage), qPrintable(errorMessage));
+
+    QVERIFY(controller.pillarModel()->rowCount() > 0);
+    const auto pillarId = controller.pillarModel()->data(controller.pillarModel()->index(0, 0),
+                                                         SmTool::Models::LookupListModel::IdRole).toString();
+
+    QVERIFY(controller.createInboxItem(QStringLiteral("Controller status item"),
+                                       QStringLiteral("Should keep selected status"),
+                                       QStringLiteral("#qt"),
+                                       pillarId,
+                                       QString{},
+                                       5,
+                                       QString{},
+                                       QString{},
+                                       QStringLiteral("clarifying"),
+                                       {},
+                                       {},
+                                       false));
+
+    QCOMPARE(controller.inboxModel()->rowCount(), 0);
+    QCOMPARE(controller.allContentModel()->rowCount(), 1);
+    const auto allIndex = controller.allContentModel()->index(0, 0);
+    QCOMPARE(controller.allContentModel()->data(allIndex, SmTool::Models::ContentListModel::StatusRole).toString(),
+             QStringLiteral("clarifying"));
+
+    const auto contentId = controller.allContentModel()->data(allIndex, SmTool::Models::ContentListModel::IdRole).toString();
+    QVERIFY(!contentId.isEmpty());
+    QCOMPARE(controller.contentDetails(contentId).value(QStringLiteral("status")).toString(),
+             QStringLiteral("clarifying"));
 }
 
 void DatabaseTests::normalizesAndCachesTags()

@@ -12,8 +12,9 @@ ApplicationWindow {
     visible: true
     title: "SmTool"
     header: ToolBar {
-        height: 36
+        implicitHeight: toolbarLayout.implicitHeight + 16
         RowLayout {
+            id: toolbarLayout
             anchors.fill: parent
             anchors.margins: 8
             spacing: 8
@@ -980,6 +981,7 @@ ApplicationWindow {
                                                         priorityBox.value,
                                                         scheduledAtSelector.value,
                                                         channelId,
+                                                        status,
                                                         quickAddDialog.mediaItems,
                                                         appSettings.effectiveMediaDataDir,
                                                         appSettings.fetchAddedUrlTitles)

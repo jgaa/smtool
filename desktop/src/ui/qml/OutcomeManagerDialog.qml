@@ -55,9 +55,16 @@ Dialog {
             return
         }
 
-        let toIndex = outcomeListView.indexAt(centerPoint.x, centerPoint.y)
-        if (toIndex < 0) {
-            toIndex = centerPoint.y <= 0 ? 0 : outcomeListModel.count - 1
+        let toIndex = 0
+        for (let index = 0; index < outcomeListModel.count; ++index) {
+            if (index === fromIndex) {
+                continue
+            }
+
+            const item = outcomeListView.itemAtIndex(index)
+            if (item && centerPoint.y > item.y + item.height / 2) {
+                toIndex += 1
+            }
         }
         if (toIndex < 0 || toIndex === fromIndex) {
             return

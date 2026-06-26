@@ -260,6 +260,7 @@ public:
                                      int priority,
                                      const QString &scheduledAt,
                                      const QString &suggestedChannelId,
+                                     const QString &status = QStringLiteral("inbox"),
                                      const QVariantList &mediaItems = {},
                                      const QString &mediaDataDir = {},
                                      bool fetchUrlTitles = false);
@@ -321,6 +322,7 @@ private:
                                  int priority,
                                  const QString &scheduledAt,
                                  const QString &suggestedChannelId,
+                                 const QString &status,
                                  const QVariantList &mediaItems,
                                  const QString &mediaDataDir,
                                  bool fetchUrlTitles);
