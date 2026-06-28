@@ -2231,6 +2231,7 @@ ApplicationWindow {
                                 infoText: info
                                 model: appController.boardModelForStatus(statusId)
                                 editDialog: quickAddDialog
+                                deleteDialog: deleteContentDialog
                                 dragLayer: window.contentItem
                                 height: boardFlickable.height
                             }

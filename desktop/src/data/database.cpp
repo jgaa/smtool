@@ -10,6 +10,8 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QTemporaryFile>
+#include <QTemporaryDir>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QStandardPaths>
@@ -28,6 +30,14 @@ struct ContentStatusSeed {
     QLatin1StringView info;
     int sortOrder;
     bool isSystem;
+};
+
+struct BaseDatabaseProbeResult {
+    bool copied = false;
+    bool opened = false;
+    bool integrityOk = false;
+    QString openError;
+    QString integrityResult;
 };
 
 constexpr auto contentStatuses = std::array{
@@ -325,6 +335,153 @@ bool executeQuery(QSqlQuery &query, QString *errorMessage)
         *errorMessage = query.lastError().text();
     }
     return false;
+}
+
+QString journalModeFailureMessage(const QString &databasePath, const QString &driverError)
+{
+    const QFileInfo databaseInfo{databasePath};
+    const QFileInfo directoryInfo{databaseInfo.absolutePath()};
+    const auto normalizedError = driverError.trimmed();
+
+    if (databaseInfo.exists() && !databaseInfo.isWritable()) {
+        return QStringLiteral(
+                   "Database file is read-only: %1. smtool needs write access to the database file and its folder "
+                   "to enable SQLite WAL mode. Fix the file ownership/permissions and, if this database was copied "
+                   "from another machine, also remove stale -wal/-shm sidecar files or copy them together.")
+            .arg(databaseInfo.absoluteFilePath());
+    }
+
+    if (!directoryInfo.isWritable()) {
+        return QStringLiteral(
+                   "Database folder is not writable: %1. smtool needs write access to the database folder to create "
+                   "SQLite WAL sidecar files (-wal and -shm).")
+            .arg(directoryInfo.absoluteFilePath());
+    }
+
+    if (!normalizedError.isEmpty()) {
+        return QStringLiteral("Could not enable SQLite WAL mode for %1: %2")
+            .arg(databaseInfo.absoluteFilePath(), normalizedError);
+    }
+
+    return QStringLiteral("Could not enable SQLite WAL mode for %1.")
+        .arg(databaseInfo.absoluteFilePath());
+}
+
+QString boolText(const bool value)
+{
+    return value ? QStringLiteral("yes") : QStringLiteral("no");
+}
+
+QString currentJournalMode(QSqlDatabase db)
+{
+    QSqlQuery query{db};
+    if (!query.exec(QStringLiteral("PRAGMA journal_mode"))) {
+        return QStringLiteral("unknown (%1)").arg(query.lastError().text().trimmed());
+    }
+    if (!query.next()) {
+        return QStringLiteral("unknown (no row returned)");
+    }
+    return query.value(0).toString().trimmed();
+}
+
+QString siblingFileWriteProbe(const QFileInfo &databaseInfo)
+{
+    QTemporaryFile probeFile(databaseInfo.absolutePath() + QStringLiteral("/smtool-wal-probe-XXXXXX"));
+    probeFile.setAutoRemove(true);
+    if (probeFile.open()) {
+        return QStringLiteral("ok");
+    }
+    return probeFile.errorString().trimmed();
+}
+
+BaseDatabaseProbeResult probeBaseDatabaseWithoutSidecars(const QString &databasePath)
+{
+    BaseDatabaseProbeResult result;
+    const QFileInfo sourceInfo{databasePath};
+    if (!sourceInfo.exists()) {
+        result.openError = QStringLiteral("database file does not exist");
+        return result;
+    }
+
+    QTemporaryDir probeDir;
+    if (!probeDir.isValid()) {
+        result.openError = QStringLiteral("could not create temp directory for probe");
+        return result;
+    }
+
+    const auto probePath = QDir{probeDir.path()}.filePath(sourceInfo.fileName());
+    if (!QFile::copy(sourceInfo.absoluteFilePath(), probePath)) {
+        result.openError = QStringLiteral("could not copy base database for probe");
+        return result;
+    }
+    result.copied = true;
+
+    const auto connectionName = QStringLiteral("smtool-base-probe-%1")
+                                    .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    {
+        auto db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+        db.setDatabaseName(probePath);
+        if (!db.open()) {
+            result.openError = db.lastError().text().trimmed();
+            db.close();
+        } else {
+            result.opened = true;
+            QSqlQuery query{db};
+            if (!query.exec(QStringLiteral("PRAGMA integrity_check"))) {
+                result.integrityResult = query.lastError().text().trimmed();
+            } else if (!query.next()) {
+                result.integrityResult = QStringLiteral("no row returned");
+            } else {
+                result.integrityResult = query.value(0).toString().trimmed();
+                result.integrityOk = result.integrityResult == QStringLiteral("ok");
+            }
+            db.close();
+        }
+    }
+    QSqlDatabase::removeDatabase(connectionName);
+    return result;
+}
+
+QString detailedJournalModeFailureMessage(QSqlDatabase db, const QString &databasePath, const QString &driverError)
+{
+    const auto baseMessage = journalModeFailureMessage(databasePath, driverError);
+    const QFileInfo databaseInfo{databasePath};
+    const QFileInfo directoryInfo{databaseInfo.absolutePath()};
+    const QFileInfo walInfo{databaseInfo.absoluteFilePath() + QStringLiteral("-wal")};
+    const QFileInfo shmInfo{databaseInfo.absoluteFilePath() + QStringLiteral("-shm")};
+    const auto probeResult = siblingFileWriteProbe(databaseInfo);
+    const auto baseProbe = probeBaseDatabaseWithoutSidecars(databasePath);
+
+    QString refinedMessage = baseMessage;
+    if (baseProbe.copied && baseProbe.opened && baseProbe.integrityOk && (walInfo.exists() || shmInfo.exists())) {
+        refinedMessage =
+            QStringLiteral("Base database file appears healthy, but the live SQLite WAL sidecar state is corrupted "
+                           "or incompatible for %1. If this database was copied or restored, make sure "
+                           "smtool.sqlite, smtool.sqlite-wal, and smtool.sqlite-shm belong together.")
+                .arg(databaseInfo.absoluteFilePath());
+    } else if (baseProbe.copied && baseProbe.opened && !baseProbe.integrityOk && !baseProbe.integrityResult.isEmpty()) {
+        refinedMessage = QStringLiteral("Base database integrity check failed for %1: %2")
+                             .arg(databaseInfo.absoluteFilePath(), baseProbe.integrityResult);
+    } else if (baseProbe.copied && !baseProbe.opened && !baseProbe.openError.isEmpty()) {
+        refinedMessage = QStringLiteral("Could not open a sidecar-free probe copy of %1: %2")
+                             .arg(databaseInfo.absoluteFilePath(), baseProbe.openError);
+    }
+
+    return QStringLiteral(
+               "%1 Diagnostics: db_exists=%2, db_writable=%3, dir_writable=%4, sidecar_probe=%5, "
+               "wal_exists=%6, shm_exists=%7, current_journal_mode=%8, base_probe_copied=%9, "
+               "base_probe_opened=%10, base_probe_integrity=%11.")
+        .arg(refinedMessage,
+             boolText(databaseInfo.exists()),
+             boolText(databaseInfo.isWritable()),
+             boolText(directoryInfo.isWritable()),
+             probeResult,
+             boolText(walInfo.exists()),
+             boolText(shmInfo.exists()),
+             currentJournalMode(db),
+             boolText(baseProbe.copied),
+             boolText(baseProbe.opened),
+             baseProbe.integrityResult.isEmpty() ? QStringLiteral("unknown") : baseProbe.integrityResult);
 }
 
 QString lookupIdByKey(QSqlDatabase db, QAnyStringView tableName, QAnyStringView key, QString *errorMessage);
@@ -672,11 +829,18 @@ bool Database::open(QString *errorMessage)
 
 bool Database::configurePragmas(QString *errorMessage)
 {
-    QSqlQuery journalModeQuery{connection()};
+    auto db = connection();
+    QSqlQuery journalModeQuery{db};
     journalModeQuery.prepare(QStringLiteral("PRAGMA journal_mode = WAL"));
     if (!executeQuery(journalModeQuery, errorMessage)) {
+        const auto detailedMessage = detailedJournalModeFailureMessage(db,
+                                                                       databasePath(),
+                                                                       errorMessage != nullptr ? *errorMessage : QString{});
+        if (errorMessage != nullptr) {
+            *errorMessage = detailedMessage;
+        }
         LOG_ERROR << "Failed to enable WAL journal mode: "
-                  << (errorMessage != nullptr ? errorMessage->toStdString() : std::string{});
+                  << detailedMessage.toStdString();
         return false;
     }
     if (journalModeQuery.next()) {

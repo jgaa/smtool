@@ -70,6 +70,25 @@ bool looksLikeMarkdown(const QString &text)
     return text.contains(QRegularExpression(QStringLiteral(R"((^|\n)\s{0,3}(#|[-*+] |\d+\. |```|> ))")));
 }
 
+bool sameContentStatuses(const std::vector<Domain::ContentStatus> &lhs,
+                         const std::vector<Domain::ContentStatus> &rhs)
+{
+    if (lhs.size() != rhs.size()) {
+        return false;
+    }
+
+    for (std::size_t index = 0; index < lhs.size(); ++index) {
+        const auto &left = lhs.at(index);
+        const auto &right = rhs.at(index);
+        if (left.id != right.id || left.info != right.info || left.sortOrder != right.sortOrder
+            || left.isSystem != right.isSystem) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 QString markdownTopic(const QString &text)
 {
     const auto lines = text.split(u'\n');
@@ -3132,6 +3151,11 @@ void AppController::syncContentStatusModels()
     }
 
     auto statuses = lookupsRepository_->contentStatuses();
+    if (sameContentStatuses(contentStatusModel_.items(), statuses)
+        && boardModels_.size() == statuses.size()) {
+        return;
+    }
+
     contentStatusModel_.setItems(statuses);
 
     std::map<QString, std::unique_ptr<Models::ContentListModel>> nextModels;

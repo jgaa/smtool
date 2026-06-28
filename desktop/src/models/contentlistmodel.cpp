@@ -40,6 +40,43 @@ QString displayTags(const QString &text)
     return formatted.join(u' ');
 }
 
+bool sameContentSummary(const Domain::ContentSummary &lhs, const Domain::ContentSummary &rhs)
+{
+    return lhs.id == rhs.id
+        && lhs.parentId == rhs.parentId
+        && lhs.burstTemplateKey == rhs.burstTemplateKey
+        && lhs.title == rhs.title
+        && lhs.description == rhs.description
+        && lhs.tags == rhs.tags
+        && lhs.pillarName == rhs.pillarName
+        && lhs.seriesName == rhs.seriesName
+        && lhs.kindName == rhs.kindName
+        && lhs.outcomeName == rhs.outcomeName
+        && lhs.suggestedChannelName == rhs.suggestedChannelName
+        && lhs.status == rhs.status
+        && lhs.priority == rhs.priority
+        && lhs.seriesPosition == rhs.seriesPosition
+        && lhs.hasSeriesPosition == rhs.hasSeriesPosition
+        && lhs.scheduledAt == rhs.scheduledAt
+        && lhs.publishedAt == rhs.publishedAt
+        && lhs.firstPublicationAt == rhs.firstPublicationAt;
+}
+
+bool sameItems(const std::vector<Domain::ContentSummary> &lhs, const std::vector<Domain::ContentSummary> &rhs)
+{
+    if (lhs.size() != rhs.size()) {
+        return false;
+    }
+
+    for (std::size_t index = 0; index < lhs.size(); ++index) {
+        if (!sameContentSummary(lhs.at(index), rhs.at(index))) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 } // namespace
 
 ContentListModel::ContentListModel(QObject *parent)
@@ -140,6 +177,10 @@ void ContentListModel::setDescriptionPreviewWordCap(int value)
 
 void ContentListModel::setItems(std::vector<Domain::ContentSummary> items)
 {
+    if (sameItems(items_, items)) {
+        return;
+    }
+
     beginResetModel();
     items_ = std::move(items);
     endResetModel();

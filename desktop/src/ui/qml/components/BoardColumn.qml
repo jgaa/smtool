@@ -10,6 +10,7 @@ Frame {
     required property string infoText
     required property var model
     required property var editDialog
+    required property var deleteDialog
     required property var dragLayer
 
     function clippedDescription(text) {
@@ -117,7 +118,9 @@ Frame {
                 clip: true
                 model: root.model
                 spacing: 8
+                rightMargin: verticalBar.width + 8
                 ScrollBar.vertical: ScrollBar {
+                    id: verticalBar
                     policy: ScrollBar.AsNeeded
                     width: 18
 
@@ -146,7 +149,7 @@ Frame {
                     required property int priority
                     required property date scheduledAt
                     required property string status
-                    width: ListView.view.width
+                    width: ListView.view.width - ListView.view.rightMargin
                     radius: 6
                     color: "white"
                     border.color: "#d5d5d5"
@@ -240,6 +243,15 @@ Frame {
                                 ToolTip.visible: hovered
                                 ToolTip.text: text
                                 onClicked: editDialog.openForEdit(itemId)
+                            }
+
+                            ToolButton {
+                                icon.name: "edit-delete"
+                                text: "Delete"
+                                display: AbstractButton.IconOnly
+                                ToolTip.visible: hovered
+                                ToolTip.text: text
+                                onClicked: deleteDialog.openForContent(itemId, title)
                             }
 
                             Item {

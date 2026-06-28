@@ -94,6 +94,7 @@ private slots:
     void calendarShowsContentAndPublicationSchedules();
     void calendarFiltersArchivedAndPublishedAndMarksOverdue();
     void reopensDatabaseAtNewPath();
+    void reportsHelpfulErrorForReadOnlyDatabaseCopy();
     void createsIdeaFromPlainText();
     void createsIdeaFromMarkdown();
     void createsIdeaFromTextUsesConfiguredDefaultPriority();
@@ -108,6 +109,7 @@ private slots:
     void updatesContentFields();
     void controllerUpdatesAndClearsContentOutcome();
     void controllerCreateInboxItemPreservesSelectedStatus();
+    void controllerRefreshAllKeepsBoardStatusModelStable();
     void normalizesAndCachesTags();
     void sortsInboxByPriorityThenCreatedAt();
     void sortsBoardByPriorityThenUpdatedAt();
@@ -118,6 +120,7 @@ private slots:
     void searchesContentByTextAndTags();
     void searchesSeriesByNameAndDescription();
     void contentModelBuildsDescriptionPreview();
+    void contentModelSkipsResetWhenItemsAreUnchanged();
     void publicationCrudWorks();
     void publicationFanOutCreatesSelectedChannelsAndSkipsExisting();
     void persistsMediaForContentAndPublication();
@@ -1562,6 +1565,41 @@ void DatabaseTests::reopensDatabaseAtNewPath()
     QCOMPARE(query.value(0).toInt(), 1);
 }
 
+void DatabaseTests::reportsHelpfulErrorForReadOnlyDatabaseCopy()
+{
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    const auto databasePath = QDir{tempDir.path()}.filePath(QStringLiteral("readonly-copy.sqlite"));
+    {
+        SmTool::Data::Database database({
+            .databaseFilePath = databasePath,
+            .connectionName = QStringLiteral("test-readonly-db-setup"),
+        });
+        QString errorMessage;
+        QVERIFY2(database.initialize(&errorMessage), qPrintable(errorMessage));
+    }
+
+    QFile::remove(databasePath + QStringLiteral("-wal"));
+    QFile::remove(databasePath + QStringLiteral("-shm"));
+    QVERIFY(QFile::setPermissions(tempDir.path(),
+                                  QFileDevice::ReadOwner | QFileDevice::ExeOwner
+                                      | QFileDevice::ReadUser | QFileDevice::ExeUser
+                                      | QFileDevice::ReadGroup | QFileDevice::ExeGroup
+                                      | QFileDevice::ReadOther | QFileDevice::ExeOther));
+
+    SmTool::Data::Database reopened({
+        .databaseFilePath = databasePath,
+        .connectionName = QStringLiteral("test-readonly-db-open"),
+    });
+    QString errorMessage;
+    QVERIFY(!reopened.initialize(&errorMessage));
+    QVERIFY(errorMessage.contains(QStringLiteral("not writable"), Qt::CaseInsensitive));
+    QVERIFY(errorMessage.contains(QFileInfo{tempDir.path()}.absoluteFilePath()));
+    QVERIFY(errorMessage.contains(QStringLiteral("Diagnostics:"), Qt::CaseInsensitive));
+    QVERIFY(errorMessage.contains(QStringLiteral("sidecar_probe="), Qt::CaseInsensitive));
+    QVERIFY(errorMessage.contains(QStringLiteral("base_probe_"), Qt::CaseInsensitive));
+}
+
 void DatabaseTests::createsIdeaFromPlainText()
 {
     SmTool::App::AppController controller({
@@ -2000,6 +2038,31 @@ void DatabaseTests::controllerCreateInboxItemPreservesSelectedStatus()
     QVERIFY(!contentId.isEmpty());
     QCOMPARE(controller.contentDetails(contentId).value(QStringLiteral("status")).toString(),
              QStringLiteral("clarifying"));
+}
+
+void DatabaseTests::controllerRefreshAllKeepsBoardStatusModelStable()
+{
+    SmTool::App::AppController controller({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-controller-refresh-board-status"),
+    });
+    QString errorMessage;
+    QVERIFY2(controller.initialize(&errorMessage), qPrintable(errorMessage));
+
+    auto *statusModel = controller.contentStatusModel();
+    QVERIFY(statusModel != nullptr);
+
+    QSignalSpy resetSpy(statusModel, &QAbstractItemModel::modelReset);
+    QVERIFY(resetSpy.isValid());
+
+    auto *shapingBoardModel = controller.boardModelForStatus(QStringLiteral("shaping"));
+    QVERIFY(shapingBoardModel != nullptr);
+
+    resetSpy.clear();
+    QVERIFY(controller.refreshAll());
+
+    QCOMPARE(resetSpy.count(), 0);
+    QCOMPARE(controller.boardModelForStatus(QStringLiteral("shaping")), shapingBoardModel);
 }
 
 void DatabaseTests::normalizesAndCachesTags()
@@ -2490,6 +2553,37 @@ void DatabaseTests::contentModelBuildsDescriptionPreview()
              QStringLiteral("This is the first sentence..."));
     QCOMPARE(model.data(model.index(0, 0), SmTool::Models::ContentListModel::DisplayTagsRole).toString(),
              QStringLiteral("#awesome #goodideas"));
+}
+
+void DatabaseTests::contentModelSkipsResetWhenItemsAreUnchanged()
+{
+    SmTool::Models::ContentListModel model;
+    const std::vector<SmTool::Domain::ContentSummary> items{
+        SmTool::Domain::ContentSummary{
+            .id = QStringLiteral("idea-1"),
+            .title = QStringLiteral("Imported idea"),
+            .description = QStringLiteral("Text from phone"),
+            .status = QStringLiteral("inbox"),
+            .priority = 10,
+        },
+        SmTool::Domain::ContentSummary{
+            .id = QStringLiteral("idea-2"),
+            .title = QStringLiteral("Existing idea"),
+            .description = QStringLiteral("Desktop text"),
+            .status = QStringLiteral("shaping"),
+            .priority = 5,
+        },
+    };
+
+    model.setItems(items);
+
+    QSignalSpy resetSpy(&model, &QAbstractItemModel::modelReset);
+    QVERIFY(resetSpy.isValid());
+
+    model.setItems(items);
+
+    QCOMPARE(resetSpy.count(), 0);
+    QCOMPARE(model.rowCount(), 2);
 }
 
 void DatabaseTests::publicationCrudWorks()
