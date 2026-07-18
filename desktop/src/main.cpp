@@ -11,6 +11,7 @@
 #include <QFileInfo>
 #include <QLockFile>
 #include <QMessageBox>
+#include <QIcon>
 #include <QQmlError>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -21,6 +22,7 @@ int main(int argc, char *argv[])
     QCoreApplication::setApplicationName(QStringLiteral("SmTool"));
     QCoreApplication::setApplicationVersion(QStringLiteral(SMTOOL_VERSION));
     QCoreApplication::setOrganizationName(QStringLiteral("smtool"));
+    QApplication::setWindowIcon(QIcon(QStringLiteral(":/smtool-talk.svg")));
 
     SmTool::App::AppInfo appInfo;
     SmTool::App::AppSettings appSettings;

@@ -767,6 +767,26 @@ bool ContentRepository::update(const Domain::ContentItem &content, QString *erro
     return false;
 }
 
+bool ContentRepository::updateScheduledAt(const QString &contentId,
+                                          const QDateTime &scheduledAt,
+                                          QString *errorMessage) const
+{
+    QSqlQuery query{database_};
+    query.prepare(QStringLiteral(
+        "UPDATE content SET scheduled_at = :scheduled_at, updated_at = :updated_at WHERE id = :id"));
+    query.bindValue(":scheduled_at"_L1, scheduledAt.toString(Qt::ISODate));
+    query.bindValue(":updated_at"_L1, QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
+    query.bindValue(":id"_L1, contentId);
+    if (query.exec()) {
+        return true;
+    }
+
+    if (errorMessage != nullptr) {
+        *errorMessage = query.lastError().text();
+    }
+    return false;
+}
+
 bool ContentRepository::updateStatus(const QString &id, const QString &newStatus, QString *errorMessage) const
 {
     const auto existing = getContentById(id);

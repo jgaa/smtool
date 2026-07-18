@@ -12,7 +12,10 @@
 #include "data/seriesrepository.h"
 
 #include <QDir>
+#include <QClipboard>
 #include <QFileInfo>
+#include <QGuiApplication>
+#include <QImage>
 #include <QHostAddress>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -122,6 +125,9 @@ private slots:
     void contentModelBuildsDescriptionPreview();
     void contentModelSkipsResetWhenItemsAreUnchanged();
     void publicationCrudWorks();
+    void publishingPublicationSchedulesAndPromotesContent();
+    void movesCalendarContentAndPublicationDates();
+    void pastesClipboardImageAsManagedMedia();
     void publicationFanOutCreatesSelectedChannelsAndSkipsExisting();
     void persistsMediaForContentAndPublication();
     void goalCrudWorks();
@@ -2639,6 +2645,145 @@ void DatabaseTests::publicationCrudWorks()
 
     QVERIFY2(publicationRepository.remove(publicationId, &errorMessage), qPrintable(errorMessage));
     QVERIFY(publicationRepository.getById(publicationId).id.isEmpty());
+}
+
+void DatabaseTests::publishingPublicationSchedulesAndPromotesContent()
+{
+    SmTool::App::AppController controller({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-publication-promotes-content"),
+    });
+    QString errorMessage;
+    QVERIFY2(controller.initialize(&errorMessage), qPrintable(errorMessage));
+
+    const auto pillarId = controller.pillarModel()->data(controller.pillarModel()->index(0, 0),
+                                                          SmTool::Models::LookupListModel::IdRole)
+                              .toString();
+    QVERIFY(controller.createInboxItem(QStringLiteral("Publication promotion"),
+                                       QStringLiteral("Promote on publish."),
+                                       {},
+                                       pillarId,
+                                       {},
+                                       0,
+                                       {},
+                                       {},
+                                       QStringLiteral("ready")));
+    const auto contentId = controller.allContentModel()->data(controller.allContentModel()->index(0, 0),
+                                                               SmTool::Models::ContentListModel::IdRole)
+                               .toString();
+    QVERIFY(!contentId.isEmpty());
+
+    const auto channels = controller.publicationFanOutOptions(contentId);
+    QVERIFY(!channels.isEmpty());
+    const auto channelId = channels.first().toMap().value(QStringLiteral("channelId")).toString();
+    const auto publishedAt = QStringLiteral("2026-06-12T12:00:00Z");
+    QVERIFY(controller.savePublication(contentId,
+                                      {},
+                                      channelId,
+                                      QStringLiteral("published"),
+                                      {},
+                                      publishedAt,
+                                      {},
+                                      {},
+                                      {},
+                                      false));
+
+    const auto details = controller.contentDetails(contentId);
+    QCOMPARE(details.value(QStringLiteral("status")).toString(), QStringLiteral("published"));
+    const auto publications = details.value(QStringLiteral("publications")).toList();
+    QCOMPARE(publications.size(), 1);
+    const auto publication = publications.first().toMap();
+    QCOMPARE(publication.value(QStringLiteral("scheduledAt")).toString(), publishedAt);
+    QCOMPARE(publication.value(QStringLiteral("publishedAt")).toString(), publishedAt);
+}
+
+void DatabaseTests::movesCalendarContentAndPublicationDates()
+{
+    SmTool::App::AppController controller({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-calendar-move"),
+    });
+    QString errorMessage;
+    QVERIFY2(controller.initialize(&errorMessage), qPrintable(errorMessage));
+
+    const auto pillarId = controller.pillarModel()->data(controller.pillarModel()->index(0, 0),
+                                                          SmTool::Models::LookupListModel::IdRole)
+                              .toString();
+    QVERIFY(controller.createInboxItem(QStringLiteral("Calendar move"),
+                                       QStringLiteral("Move calendar entries."),
+                                       {},
+                                       pillarId,
+                                       {},
+                                       0,
+                                       QStringLiteral("2026-06-10"),
+                                       {},
+                                       QStringLiteral("inbox")));
+    const auto contentId = controller.inboxModel()->data(controller.inboxModel()->index(0, 0),
+                                                          SmTool::Models::ContentListModel::IdRole)
+                              .toString();
+    const auto channels = controller.publicationFanOutOptions(contentId);
+    QVERIFY(channels.size() >= 2);
+
+    for (int index = 0; index < 2; ++index) {
+        const auto channelId = channels.at(index).toMap().value(QStringLiteral("channelId")).toString();
+        QVERIFY(controller.savePublication(contentId,
+                                          {},
+                                          channelId,
+                                          QStringLiteral("scheduled"),
+                                          QStringLiteral("2026-06-10"),
+                                          {},
+                                          {},
+                                          {},
+                                          {},
+                                          false));
+    }
+
+    QVERIFY(controller.moveCalendarEntry(contentId,
+                                         QStringLiteral("publication"),
+                                         QStringLiteral("2026-06-10"),
+                                         QStringLiteral("2026-06-12")));
+    const auto movedDetails = controller.contentDetails(contentId);
+    const auto publications = movedDetails.value(QStringLiteral("publications")).toList();
+    QCOMPARE(publications.size(), 2);
+    for (const auto &value : publications) {
+        QVERIFY(value.toMap().value(QStringLiteral("scheduledAt")).toString().startsWith(QStringLiteral("2026-06-12")));
+    }
+
+    QVERIFY(controller.moveCalendarEntry(contentId,
+                                         QStringLiteral("content"),
+                                         QStringLiteral("2026-06-10"),
+                                         QStringLiteral("2026-06-13")));
+    QVERIFY(controller.contentDetails(contentId).value(QStringLiteral("scheduledAt")).toString().startsWith(
+        QStringLiteral("2026-06-13")));
+}
+
+void DatabaseTests::pastesClipboardImageAsManagedMedia()
+{
+    SmTool::App::AppController controller({
+        .databaseFilePath = createTempDatabasePath(),
+        .connectionName = QStringLiteral("test-clipboard-image-media"),
+    });
+    QString errorMessage;
+    QVERIFY2(controller.initialize(&errorMessage), qPrintable(errorMessage));
+
+    QTemporaryDir mediaDir;
+    QVERIFY(mediaDir.isValid());
+    auto *clipboard = QGuiApplication::clipboard();
+    QVERIFY(clipboard != nullptr);
+    clipboard->setImage(QImage(13, 7, QImage::Format_RGB32));
+    QCoreApplication::processEvents();
+    QVERIFY(controller.clipboardHasImage());
+
+    const auto item = controller.pasteClipboardImage(mediaDir.path());
+    QCOMPARE(item.value(QStringLiteral("name")).toString(), QStringLiteral("Screenshot"));
+    QCOMPARE(item.value(QStringLiteral("sourceType")).toString(), QStringLiteral("managed_file"));
+    const auto storedPath = QDir{mediaDir.path()}.filePath(item.value(QStringLiteral("location")).toString());
+    QVERIFY(QFileInfo::exists(storedPath));
+    const auto storedImage = QImage{storedPath};
+    QCOMPARE(storedImage.size(), QSize(13, 7));
+
+    clipboard->clear();
+    QCoreApplication::processEvents();
 }
 
 void DatabaseTests::publicationFanOutCreatesSelectedChannelsAndSkipsExisting()

@@ -13,6 +13,7 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QGuiApplication>
+#include <QImageWriter>
 #include <QMimeData>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
@@ -532,6 +533,8 @@ void AppController::setSeriesShowArchived(bool enabled)
 
 bool AppController::clipboardHasText() const { return clipboardHasText_; }
 
+bool AppController::clipboardHasImage() const { return clipboardHasImage_; }
+
 QString AppController::currentSourceId() const { return currentSourceId_; }
 
 void AppController::setCurrentSourceId(const QString &id)
@@ -579,18 +582,6 @@ QVariantMap AppController::currentSeriesDetails() const
         {QStringLiteral("createdAt"), series.createdAt.isValid() ? series.createdAt.toString(Qt::ISODate) : QString{}},
         {QStringLiteral("updatedAt"), series.updatedAt.isValid() ? series.updatedAt.toString(Qt::ISODate) : QString{}},
     };
-}
-
-QString AppController::seriesSearchQuery() const { return seriesSearchQuery_; }
-
-void AppController::setSeriesSearchQuery(const QString &value)
-{
-    if (seriesSearchQuery_ == value) {
-        return;
-    }
-    seriesSearchQuery_ = value;
-    refreshSeries();
-    emit seriesSearchQueryChanged();
 }
 
 QString AppController::searchQuery() const { return searchQuery_; }
@@ -693,7 +684,11 @@ void AppController::configureDashboardPipelinePeriod(const QString &key,
 QObject *AppController::boardModelForStatus(const QString &statusId) const
 {
     const auto it = boardModels_.find(statusId);
-    return it != boardModels_.end() ? it->second.get() : nullptr;
+    if (it == boardModels_.end()) {
+        return nullptr;
+    }
+
+    return it->second;
 }
 
 bool AppController::applyDatabasePath(const QString &path)
@@ -905,6 +900,49 @@ QString AppController::copyMediaFileToDataDir(const QString &sourcePath, const Q
     LOG_INFO << "Media file copied from '" << sourcePath.toStdString()
              << "' to '" << copiedPath.toStdString() << "'";
     return copiedPath;
+}
+
+QVariantMap AppController::pasteClipboardImage(const QString &mediaDataDir)
+{
+    const auto *clipboard = QGuiApplication::clipboard();
+    if (clipboard == nullptr || clipboard->mimeData() == nullptr || !clipboard->mimeData()->hasImage()) {
+        setStatusMessage(QStringLiteral("Clipboard does not contain an image."));
+        return {};
+    }
+
+    const auto image = clipboard->image();
+    if (image.isNull()) {
+        setStatusMessage(QStringLiteral("Could not read the clipboard image."));
+        return {};
+    }
+
+    const auto baseDir = mediaDataDir.trimmed();
+    if (baseDir.isEmpty()) {
+        setStatusMessage(QStringLiteral("Media data directory is not configured."));
+        return {};
+    }
+
+    QDir dir{baseDir};
+    if (!dir.mkpath(QStringLiteral("media"))) {
+        setStatusMessage(QStringLiteral("Could not create media storage directory."));
+        return {};
+    }
+
+    const auto relativeTargetPath = QDir{QStringLiteral("media")}.filePath(
+        QUuid::createUuid().toString(QUuid::WithoutBraces) + QStringLiteral("_Screenshot.jpg"));
+    const auto absoluteTargetPath = dir.filePath(relativeTargetPath);
+    QImageWriter writer{absoluteTargetPath, QByteArrayLiteral("jpg")};
+    writer.setQuality(90);
+    if (!writer.write(image)) {
+        setStatusMessage(QStringLiteral("Could not save clipboard image: %1").arg(writer.errorString()));
+        return {};
+    }
+
+    return {
+        {QStringLiteral("name"), QStringLiteral("Screenshot")},
+        {QStringLiteral("sourceType"), QStringLiteral("managed_file")},
+        {QStringLiteral("location"), relativeTargetPath},
+    };
 }
 
 void AppController::logDebug(const QString &message) const
@@ -2433,6 +2471,10 @@ bool AppController::savePublication(const QString &contentId,
     };
 
     QString errorMessage;
+    if (publication.publishedAt.isValid() && !publication.scheduledAt.isValid()) {
+        publication.scheduledAt = publication.publishedAt;
+    }
+
     const auto preparedMedia = prepareMediaItems(mediaItems, mediaDataDir, fetchUrlTitles, &errorMessage);
     if (!errorMessage.isEmpty()) {
         setStatusMessage(errorMessage);
@@ -2453,6 +2495,26 @@ bool AppController::savePublication(const QString &contentId,
         setStatusMessage(errorMessage);
         return false;
     }
+    if (publication.publishedAt.isValid()) {
+        const auto content = contentRepository_->getById(publication.contentId);
+        const auto statuses = lookupsRepository_->contentStatuses();
+        const auto publishedStatus = std::ranges::find_if(statuses, [](const auto &contentStatus) {
+            return contentStatus.id == "published"_L1;
+        });
+        if (publishedStatus == statuses.end()) {
+            LOG_WARN << "Could not promote content after publication: content status key 'published' was not found";
+        } else if (!content.id.isEmpty() && content.status != publishedStatus->id) {
+            const auto currentStatus = std::ranges::find_if(statuses, [&content](const auto &contentStatus) {
+                return contentStatus.id == content.status;
+            });
+            if (currentStatus != statuses.end() && currentStatus->sortOrder < publishedStatus->sortOrder
+                && !contentRepository_->updateStatus(content.id, publishedStatus->id, &errorMessage)) {
+                rollbackSavepoint(db, QStringLiteral("app_publication_save"));
+                setStatusMessage(errorMessage);
+                return false;
+            }
+        }
+    }
     if (!mediaRepository_->replaceForPublication(resolvedPublicationId, preparedMedia, &errorMessage)) {
         rollbackSavepoint(db, QStringLiteral("app_publication_save"));
         setStatusMessage(errorMessage);
@@ -2466,6 +2528,46 @@ bool AppController::savePublication(const QString &contentId,
 
     refreshAll();
     setStatusMessage(QStringLiteral("Publication saved."));
+    return true;
+}
+
+bool AppController::moveCalendarEntry(const QString &contentId,
+                                      const QString &sourceType,
+                                      const QString &fromDate,
+                                      const QString &toDate)
+{
+    const auto trimmedContentId = contentId.trimmed();
+    const auto trimmedSourceType = sourceType.trimmed();
+    const auto previousDate = QDate::fromString(fromDate.trimmed(), Qt::ISODate);
+    const auto nextDate = QDate::fromString(toDate.trimmed(), Qt::ISODate);
+    if (trimmedContentId.isEmpty() || (trimmedSourceType != "content"_L1 && trimmedSourceType != "publication"_L1)
+        || !previousDate.isValid() || !nextDate.isValid()) {
+        setStatusMessage(QStringLiteral("Invalid calendar move."));
+        return false;
+    }
+
+    const auto scheduledAt = parseOptionalDateTime(toDate.trimmed());
+    QString errorMessage;
+    auto db = database_.connection();
+    if (!beginSavepoint(db, QStringLiteral("app_calendar_move"), &errorMessage)) {
+        setStatusMessage(errorMessage.isEmpty() ? QStringLiteral("Could not start calendar move.") : errorMessage);
+        return false;
+    }
+
+    const bool moved = trimmedSourceType == "publication"_L1
+        ? publicationRepository_->updateScheduledAtForContentOnDate(trimmedContentId,
+                                                                     previousDate,
+                                                                     scheduledAt,
+                                                                     &errorMessage)
+        : contentRepository_->updateScheduledAt(trimmedContentId, scheduledAt, &errorMessage);
+    if (!moved || !releaseSavepoint(db, QStringLiteral("app_calendar_move"), &errorMessage)) {
+        rollbackSavepoint(db, QStringLiteral("app_calendar_move"));
+        setStatusMessage(errorMessage.isEmpty() ? QStringLiteral("Could not move calendar entry.") : errorMessage);
+        return false;
+    }
+
+    refreshAll();
+    setStatusMessage(QStringLiteral("Calendar entry moved."));
     return true;
 }
 
@@ -3158,16 +3260,22 @@ void AppController::syncContentStatusModels()
 
     contentStatusModel_.setItems(statuses);
 
-    std::map<QString, std::unique_ptr<Models::ContentListModel>> nextModels;
+    std::map<QString, Models::ContentListModel *> nextModels;
     for (const auto &status : statuses) {
         if (auto existing = boardModels_.extract(status.id); !existing.empty()) {
-            nextModels.emplace(status.id, std::move(existing.mapped()));
+            nextModels.emplace(status.id, existing.mapped());
             continue;
         }
 
-        auto model = std::make_unique<Models::ContentListModel>();
+        auto *model = new Models::ContentListModel(this);
         model->setDescriptionPreviewWordCap(descriptionPreviewWordCap_);
-        nextModels.emplace(status.id, std::move(model));
+        nextModels.emplace(status.id, model);
+    }
+
+    for (const auto &[statusId, model] : boardModels_) {
+        if (!nextModels.contains(statusId)) {
+            delete model;
+        }
     }
 
     boardModels_ = std::move(nextModels);
@@ -3219,7 +3327,7 @@ void AppController::refreshDerivatives()
 
 void AppController::refreshSeries()
 {
-    seriesModel_.setItems(seriesRepository_->list(seriesShowArchived_, seriesSearchQuery_));
+    seriesModel_.setItems(seriesRepository_->list(seriesShowArchived_, searchQuery_));
     if (currentSeriesId_.isEmpty() && seriesModel_.rowCount() > 0) {
         currentSeriesId_ = seriesModel_.data(seriesModel_.index(0, 0), Models::SeriesListModel::IdRole).toString();
         emit currentSeriesChanged();
@@ -3273,18 +3381,25 @@ void AppController::refreshDashboard()
 void AppController::refreshClipboardHasText()
 {
     bool hasText = false;
+    bool hasImage = false;
     if (const auto *clipboard = QGuiApplication::clipboard()) {
         if (const auto *mimeData = clipboard->mimeData()) {
             hasText = mimeData->hasText();
+            hasImage = mimeData->hasImage();
         }
     }
 
-    if (clipboardHasText_ == hasText) {
+    if (clipboardHasText_ != hasText) {
+        clipboardHasText_ = hasText;
+        emit clipboardHasTextChanged();
+    }
+
+    if (clipboardHasImage_ == hasImage) {
         return;
     }
 
-    clipboardHasText_ = hasText;
-    emit clipboardHasTextChanged();
+    clipboardHasImage_ = hasImage;
+    emit clipboardHasImageChanged();
 }
 
 bool AppController::isValidLookupKey(const QString &key) const

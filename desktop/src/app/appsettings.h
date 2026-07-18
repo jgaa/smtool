@@ -25,6 +25,8 @@ class AppSettings : public QObject
     Q_PROPERTY(bool pruneLogFile READ pruneLogFile WRITE setPruneLogFile NOTIFY pruneLogFileChanged)
     Q_PROPERTY(bool confirmContentDeletion READ confirmContentDeletion WRITE setConfirmContentDeletion NOTIFY confirmContentDeletionChanged)
     Q_PROPERTY(bool fetchAddedUrlTitles READ fetchAddedUrlTitles WRITE setFetchAddedUrlTitles NOTIFY fetchAddedUrlTitlesChanged)
+    Q_PROPERTY(int calendarFirstDayOfWeek READ calendarFirstDayOfWeek WRITE setCalendarFirstDayOfWeek NOTIFY calendarFirstDayOfWeekChanged)
+    Q_PROPERTY(int localeFirstDayOfWeek READ localeFirstDayOfWeek CONSTANT)
     Q_PROPERTY(bool mobileConnectEnabled READ mobileConnectEnabled WRITE setMobileConnectEnabled NOTIFY mobileConnectEnabledChanged)
     Q_PROPERTY(QString mobileConnectListenIp READ mobileConnectListenIp WRITE setMobileConnectListenIp NOTIFY mobileConnectListenIpChanged)
     Q_PROPERTY(int mobileConnectPort READ mobileConnectPort WRITE setMobileConnectPort NOTIFY mobileConnectPortChanged)
@@ -74,6 +76,9 @@ public:
 
     [[nodiscard]] bool fetchAddedUrlTitles() const;
     void setFetchAddedUrlTitles(bool enabled);
+    [[nodiscard]] int calendarFirstDayOfWeek() const;
+    void setCalendarFirstDayOfWeek(int day);
+    [[nodiscard]] int localeFirstDayOfWeek() const;
 
     [[nodiscard]] bool mobileConnectEnabled() const;
     void setMobileConnectEnabled(bool enabled);
@@ -100,6 +105,7 @@ signals:
     void pruneLogFileChanged();
     void confirmContentDeletionChanged();
     void fetchAddedUrlTitlesChanged();
+    void calendarFirstDayOfWeekChanged();
     void mobileConnectEnabledChanged();
     void mobileConnectListenIpChanged();
     void mobileConnectPortChanged();
@@ -112,6 +118,7 @@ private:
     [[nodiscard]] int normalizedImportedIdeaTitleWordCap(int value) const;
     [[nodiscard]] int normalizedCardDescriptionWordCap(int value) const;
     [[nodiscard]] int normalizedMobileConnectPort(int value) const;
+    [[nodiscard]] int normalizedCalendarFirstDayOfWeek(int value) const;
 };
 
 } // namespace SmTool::App

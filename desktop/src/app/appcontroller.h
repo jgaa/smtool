@@ -57,10 +57,10 @@ class AppController : public QObject
     Q_PROPERTY(bool calendarIncludePublished READ calendarIncludePublished WRITE setCalendarIncludePublished NOTIFY calendarIncludePublishedChanged)
     Q_PROPERTY(bool seriesShowArchived READ seriesShowArchived WRITE setSeriesShowArchived NOTIFY seriesShowArchivedChanged)
     Q_PROPERTY(bool clipboardHasText READ clipboardHasText NOTIFY clipboardHasTextChanged)
+    Q_PROPERTY(bool clipboardHasImage READ clipboardHasImage NOTIFY clipboardHasImageChanged)
     Q_PROPERTY(QString currentSourceId READ currentSourceId WRITE setCurrentSourceId NOTIFY currentSourceIdChanged)
     Q_PROPERTY(QString currentSeriesId READ currentSeriesId WRITE setCurrentSeriesId NOTIFY currentSeriesChanged)
     Q_PROPERTY(QVariantMap currentSeriesDetails READ currentSeriesDetails NOTIFY currentSeriesChanged)
-    Q_PROPERTY(QString seriesSearchQuery READ seriesSearchQuery WRITE setSeriesSearchQuery NOTIFY seriesSearchQueryChanged)
     Q_PROPERTY(QString searchQuery READ searchQuery WRITE setSearchQuery NOTIFY searchQueryChanged)
     Q_PROPERTY(QString dashboardPerformancePeriodKey READ dashboardPerformancePeriodKey NOTIFY dashboardPeriodsChanged)
     Q_PROPERTY(QString dashboardPerformanceStartDate READ dashboardPerformanceStartDate NOTIFY dashboardPeriodsChanged)
@@ -123,15 +123,13 @@ public:
     void setSeriesShowArchived(bool enabled);
 
     [[nodiscard]] bool clipboardHasText() const;
+    [[nodiscard]] bool clipboardHasImage() const;
 
     [[nodiscard]] QString currentSourceId() const;
     void setCurrentSourceId(const QString &id);
     [[nodiscard]] QString currentSeriesId() const;
     void setCurrentSeriesId(const QString &id);
     [[nodiscard]] QVariantMap currentSeriesDetails() const;
-    [[nodiscard]] QString seriesSearchQuery() const;
-    void setSeriesSearchQuery(const QString &value);
-
     [[nodiscard]] QString searchQuery() const;
     void setSearchQuery(const QString &value);
     [[nodiscard]] QString dashboardPerformancePeriodKey() const;
@@ -165,6 +163,7 @@ public:
     Q_INVOKABLE QString acceptableIdeaImportPath(const QVariantList &urls, const QString &text) const;
     Q_INVOKABLE QString chooseMediaFile() const;
     Q_INVOKABLE QString localPathFromUrl(const QString &urlText) const;
+    Q_INVOKABLE QVariantMap pasteClipboardImage(const QString &mediaDataDir);
     Q_INVOKABLE bool openMedia(const QVariantMap &mediaItem, const QString &mediaDataDir) const;
     Q_INVOKABLE QString copyMediaFileToDataDir(const QString &sourcePath, const QString &mediaDataDir);
     Q_INVOKABLE void logDebug(const QString &message) const;
@@ -249,6 +248,10 @@ public:
                                      const QVariantList &mediaItems,
                                      const QString &mediaDataDir,
                                      bool fetchUrlTitles);
+    Q_INVOKABLE bool moveCalendarEntry(const QString &contentId,
+                                       const QString &sourceType,
+                                       const QString &fromDate,
+                                       const QString &toDate);
     Q_INVOKABLE bool createPublicationFanOut(const QString &contentId, const QVariantList &channelIds);
     Q_INVOKABLE bool deletePublication(const QString &publicationId);
     Q_INVOKABLE bool deleteContent(const QString &contentId);
@@ -287,9 +290,9 @@ signals:
     void calendarIncludePublishedChanged();
     void seriesShowArchivedChanged();
     void clipboardHasTextChanged();
+    void clipboardHasImageChanged();
     void currentSourceIdChanged();
     void currentSeriesChanged();
-    void seriesSearchQueryChanged();
     void searchQueryChanged();
     void dashboardPeriodsChanged();
     void statusMessageChanged();
@@ -380,9 +383,9 @@ private:
     bool calendarIncludePublished_ = false;
     bool seriesShowArchived_ = false;
     bool clipboardHasText_ = false;
+    bool clipboardHasImage_ = false;
     QString currentSourceId_;
     QString currentSeriesId_;
-    QString seriesSearchQuery_;
     QString searchQuery_;
     QString statusMessage_;
     int defaultContentPriority_ = 5;
@@ -390,7 +393,7 @@ private:
     int importedIdeaTitleWordCap_ = 8;
     int descriptionPreviewWordCap_ = 20;
     Data::ContentRepository::SortMode allContentSortMode_ = Data::ContentRepository::SortMode::DueDateAlphabetical;
-    std::map<QString, std::unique_ptr<Models::ContentListModel>> boardModels_;
+    std::map<QString, Models::ContentListModel *> boardModels_;
 };
 
 } // namespace SmTool::App

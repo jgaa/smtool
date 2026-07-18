@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.28)
 
-project(SmTool VERSION 0.3.0 LANGUAGES CXX)
+project(SmTool VERSION 0.4.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -114,9 +114,13 @@ qt_add_qml_module(SmToolApp
         src/ui/qml/components/SectionCard.qml
 )
 
+set(SMTOOL_ICON "${CMAKE_CURRENT_SOURCE_DIR}/../design/smtool-talk.svg")
+set_source_files_properties("${SMTOOL_ICON}" PROPERTIES QT_RESOURCE_ALIAS "smtool-talk.svg")
+
 qt_add_resources(SmToolApp smtool_resources
     PREFIX /
     FILES
+        ${SMTOOL_ICON}
         resources/migrations/001_initial.sql
         resources/migrations/002_goals.sql
         resources/migrations/003_series_positions.sql

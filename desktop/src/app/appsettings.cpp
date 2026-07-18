@@ -4,6 +4,7 @@
 #include "data/database.h"
 
 #include <QDir>
+#include <QLocale>
 #include <QSettings>
 #include <QStandardPaths>
 
@@ -248,6 +249,28 @@ void AppSettings::setFetchAddedUrlTitles(bool enabled)
     emit fetchAddedUrlTitlesChanged();
 }
 
+int AppSettings::calendarFirstDayOfWeek() const
+{
+    return normalizedCalendarFirstDayOfWeek(
+        QSettings{}.value(QStringLiteral("ui/calendarFirstDayOfWeek"), 0).toInt());
+}
+
+void AppSettings::setCalendarFirstDayOfWeek(int day)
+{
+    const auto normalized = normalizedCalendarFirstDayOfWeek(day);
+    if (calendarFirstDayOfWeek() == normalized) {
+        return;
+    }
+
+    saveValue(QStringLiteral("ui/calendarFirstDayOfWeek"), normalized);
+    emit calendarFirstDayOfWeekChanged();
+}
+
+int AppSettings::localeFirstDayOfWeek() const
+{
+    return static_cast<int>(QLocale::system().firstDayOfWeek());
+}
+
 bool AppSettings::mobileConnectEnabled() const
 {
     return QSettings{}.value(QStringLiteral("mobileConnect/enabled"), false).toBool();
@@ -328,6 +351,9 @@ void AppSettings::ensureDefaults() const
     if (!settings.contains(QStringLiteral("ui/fetchAddedUrlTitles"))) {
         settings.setValue(QStringLiteral("ui/fetchAddedUrlTitles"), false);
     }
+    if (!settings.contains(QStringLiteral("ui/calendarFirstDayOfWeek"))) {
+        settings.setValue(QStringLiteral("ui/calendarFirstDayOfWeek"), 0);
+    }
     if (!settings.contains(QStringLiteral("mobileConnect/enabled"))) {
         settings.setValue(QStringLiteral("mobileConnect/enabled"), false);
     }
@@ -381,6 +407,11 @@ int AppSettings::normalizedCardDescriptionWordCap(int value) const
 int AppSettings::normalizedMobileConnectPort(int value) const
 {
     return std::clamp(value, 1024, 65535);
+}
+
+int AppSettings::normalizedCalendarFirstDayOfWeek(int value) const
+{
+    return value >= 1 && value <= 7 ? value : 0;
 }
 
 } // namespace SmTool::App

@@ -89,6 +89,11 @@ int ContentListModel::rowCount(const QModelIndex &parent) const
     return parent.isValid() ? 0 : static_cast<int>(items_.size());
 }
 
+int ContentListModel::count() const
+{
+    return rowCount();
+}
+
 QVariant ContentListModel::data(const QModelIndex &index, int role) const
 {
     if (!index.isValid() || index.row() < 0 || index.row() >= rowCount()) {

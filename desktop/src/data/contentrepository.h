@@ -36,6 +36,9 @@ public:
     [[nodiscard]] QString create(const Domain::ContentItem &content, QString *errorMessage = nullptr) const;
     [[nodiscard]] QString createInSeries(const QString &seriesId, Domain::ContentItem content, QString *errorMessage = nullptr) const;
     bool update(const Domain::ContentItem &content, QString *errorMessage = nullptr) const;
+    bool updateScheduledAt(const QString &contentId,
+                           const QDateTime &scheduledAt,
+                           QString *errorMessage = nullptr) const;
     bool updateStatus(const QString &id, const QString &newStatus, QString *errorMessage = nullptr) const;
     bool assignContentToSeries(const QString &contentId, const QString &seriesId, QString *errorMessage = nullptr) const;
     bool removeContentFromSeries(const QString &contentId, QString *errorMessage = nullptr) const;

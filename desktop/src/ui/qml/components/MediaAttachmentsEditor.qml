@@ -7,6 +7,7 @@ Frame {
 
     property var items: []
     property string mediaDataDir: ""
+    property bool allowClipboardImage: false
 
     function droppedLocalPath(drop) {
         if (drop.urls && drop.urls.length > 0) {
@@ -111,6 +112,18 @@ Frame {
             Button {
                 text: "Add"
                 onClicked: mediaItemDialog.openForCreate("")
+            }
+
+            Button {
+                visible: root.allowClipboardImage
+                enabled: appController.clipboardHasImage
+                text: "Paste image"
+                onClicked: {
+                    const item = appController.pasteClipboardImage(root.mediaDataDir)
+                    if (item && item.location) {
+                        root.addOrUpdateItem(item, -1)
+                    }
+                }
             }
         }
 

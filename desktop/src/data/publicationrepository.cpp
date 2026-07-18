@@ -238,6 +238,29 @@ bool PublicationRepository::update(const Domain::Publication &publication, QStri
     return false;
 }
 
+bool PublicationRepository::updateScheduledAtForContentOnDate(const QString &contentId,
+                                                              const QDate &fromDate,
+                                                              const QDateTime &scheduledAt,
+                                                              QString *errorMessage) const
+{
+    QSqlQuery query{database_};
+    query.prepare(QStringLiteral(
+        "UPDATE publication SET scheduled_at = :scheduled_at, updated_at = :updated_at "
+        "WHERE content_id = :content_id AND date(scheduled_at) = :from_date"));
+    query.bindValue(":scheduled_at"_L1, scheduledAt.toString(Qt::ISODate));
+    query.bindValue(":updated_at"_L1, QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
+    query.bindValue(":content_id"_L1, contentId);
+    query.bindValue(":from_date"_L1, fromDate.toString(Qt::ISODate));
+    if (query.exec()) {
+        return true;
+    }
+
+    if (errorMessage != nullptr) {
+        *errorMessage = query.lastError().text();
+    }
+    return false;
+}
+
 bool PublicationRepository::remove(const QString &id, QString *errorMessage) const
 {
     QSqlQuery query{database_};

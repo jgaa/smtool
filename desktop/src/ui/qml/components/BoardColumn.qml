@@ -51,6 +51,16 @@ Frame {
                 Layout.fillWidth: true
             }
 
+            Label {
+                id: itemCountLabel
+                text: root.model ? root.model.count() : 0
+                font.bold: false
+                font.pixelSize: 14
+                color: "#555555"
+                Layout.minimumWidth: implicitWidth
+                Layout.preferredWidth: implicitWidth
+            }
+
             ToolButton {
                 id: infoButton
                 text: "i"

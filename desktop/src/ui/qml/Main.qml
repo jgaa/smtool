@@ -80,7 +80,17 @@ ApplicationWindow {
         return item.selectedText.toString()
     }
     property bool activeHasSelection: activeSelectedText.length > 0
-    property var calendarSections: []
+    property date calendarMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+    property var calendarCells: []
+    readonly property var calendarWeekdayNames: [
+        qsTr("Monday"),
+        qsTr("Tuesday"),
+        qsTr("Wednesday"),
+        qsTr("Thursday"),
+        qsTr("Friday"),
+        qsTr("Saturday"),
+        qsTr("Sunday")
+    ]
 
     function clippedCardDescription(text) {
         const source = text.trim()
@@ -110,52 +120,173 @@ ApplicationWindow {
         appController.copyTextToClipboard(window.activeSelectedText)
     }
 
-    function rebuildCalendarSections() {
-        const sections = []
-        const model = appController.calendarModel
-        const todayKey = Qt.formatDate(new Date(), "yyyy-MM-dd")
-        let currentSection = null
+    function calendarFirstDay() {
+        return appSettings.calendarFirstDayOfWeek > 0
+            ? appSettings.calendarFirstDayOfWeek
+            : appSettings.localeFirstDayOfWeek
+    }
 
+    function calendarDateKey(date) {
+        return date.getFullYear().toString().padStart(4, "0") + "-"
+            + (date.getMonth() + 1).toString().padStart(2, "0") + "-"
+            + date.getDate().toString().padStart(2, "0")
+    }
+
+    function calendarWeekNumber(date) {
+        const target = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+        const day = target.getDay() === 0 ? 7 : target.getDay()
+        target.setDate(target.getDate() + 4 - day)
+        const yearStart = new Date(target.getFullYear(), 0, 1)
+        return Math.ceil((((target - yearStart) / 86400000) + 1) / 7)
+    }
+
+    function rebuildCalendarGrid() {
+        const entriesByDate = {}
+        const model = appController.calendarModel
         for (let index = 0; index < model.count(); ++index) {
             const entry = model.entryAt(index)
             const dateKey = Qt.formatDate(entry.scheduledAt, "yyyy-MM-dd")
-
-            if (!currentSection || currentSection.dateKey !== dateKey) {
-                currentSection = {
-                    dateKey: dateKey,
-                    isToday: dateKey === todayKey,
-                    hasContent: false,
-                    hasPublication: false,
-                    items: []
-                }
-                sections.push(currentSection)
+            if (!entriesByDate[dateKey]) {
+                entriesByDate[dateKey] = []
             }
-
+            const entries = entriesByDate[dateKey]
             if (entry.sourceType === "publication") {
-                currentSection.hasPublication = true
+                let publicationGroup = null
+                for (let groupIndex = 0; groupIndex < entries.length; ++groupIndex) {
+                    if (entries[groupIndex].sourceType === "publication"
+                        && entries[groupIndex].contentId === entry.contentId) {
+                        publicationGroup = entries[groupIndex]
+                        break
+                    }
+                }
+                if (publicationGroup) {
+                    publicationGroup.count += 1
+                    publicationGroup.isOverdue = publicationGroup.isOverdue || entry.isOverdue
+                } else {
+                    entries.push({
+                        title: entry.title,
+                        contentId: entry.contentId,
+                        series: entry.series,
+                        channel: entry.channel,
+                        sourceType: entry.sourceType,
+                        count: 1,
+                        dateKey: dateKey,
+                        isOverdue: entry.isOverdue
+                    })
+                }
             } else {
-                currentSection.hasContent = true
+                entries.push({
+                    title: entry.title,
+                    contentId: entry.contentId,
+                    series: entry.series,
+                    channel: entry.channel,
+                    sourceType: entry.sourceType,
+                    count: 1,
+                    dateKey: dateKey,
+                    isOverdue: entry.isOverdue
+                })
             }
+        }
 
-            currentSection.items.push({
-                title: entry.title,
-                series: entry.series,
-                channel: entry.channel,
-                sourceType: entry.sourceType,
-                isOverdue: entry.isOverdue
+        const firstOfMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), 1)
+        const localeDay = firstOfMonth.getDay() === 0 ? 7 : firstOfMonth.getDay()
+        const leadingDays = (localeDay - calendarFirstDay() + 7) % 7
+        const daysInMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 0).getDate()
+        const cellCount = Math.ceil((leadingDays + daysInMonth) / 7) * 7
+        const todayKey = calendarDateKey(new Date())
+        const cells = []
+
+        for (let index = 0; index < cellCount; ++index) {
+            const date = new Date(firstOfMonth.getFullYear(), firstOfMonth.getMonth(), index - leadingDays + 1)
+            const dateKey = calendarDateKey(date)
+            if (index % 7 === 0) {
+                cells.push({
+                    isWeekNumber: true,
+                    weekNumber: window.calendarWeekNumber(date)
+                })
+            }
+            cells.push({
+                isWeekNumber: false,
+                dateKey: dateKey,
+                dayNumber: date.getDate(),
+                weekNumber: window.calendarWeekNumber(date),
+                isCurrentMonth: date.getMonth() === firstOfMonth.getMonth(),
+                isToday: dateKey === todayKey,
+                items: entriesByDate[dateKey] || []
             })
         }
 
-        calendarSections = sections
+        calendarCells = cells
     }
 
-    Component.onCompleted: rebuildCalendarSections()
+    function moveCalendarMonth(delta) {
+        calendarMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + delta, 1)
+        rebuildCalendarGrid()
+    }
+
+    function moveCalendarYear(delta) {
+        calendarMonth = new Date(calendarMonth.getFullYear() + delta, calendarMonth.getMonth(), 1)
+        rebuildCalendarGrid()
+    }
+
+    Component.onCompleted: rebuildCalendarGrid()
 
     Connections {
         target: appController.calendarModel
 
         function onModelReset() {
-            window.rebuildCalendarSections()
+            window.rebuildCalendarGrid()
+        }
+    }
+
+    Connections {
+        target: appSettings
+
+        function onCalendarFirstDayOfWeekChanged() {
+            window.rebuildCalendarGrid()
+        }
+    }
+
+    Dialog {
+        id: calendarMoveDialog
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        modal: true
+        focus: true
+        title: "Move calendar entry"
+        standardButtons: DialogButtonBox.Save | DialogButtonBox.Cancel
+
+        property string contentId: ""
+        property string sourceType: ""
+        property string fromDate: ""
+
+        function openFor(entry) {
+            contentId = entry.contentId
+            sourceType = entry.sourceType
+            fromDate = entry.dateKey
+            moveDateSelector.value = entry.dateKey
+            open()
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 12
+
+            Label {
+                text: "Choose a new date for this calendar entry."
+                wrapMode: Text.WordWrap
+            }
+
+            DateSelector {
+                id: moveDateSelector
+                Layout.fillWidth: true
+            }
+        }
+
+        onAccepted: {
+            if (appController.moveCalendarEntry(contentId, sourceType, fromDate, moveDateSelector.value)) {
+                close()
+            }
         }
     }
 
@@ -1130,6 +1261,7 @@ ApplicationWindow {
                         id: publicationMediaEditor
                         Layout.fillWidth: true
                         mediaDataDir: appSettings.effectiveMediaDataDir
+                        allowClipboardImage: true
                         onItemsChanged: publicationDialog.mediaItems = items
                     }
                 }
@@ -2252,154 +2384,206 @@ ApplicationWindow {
                 SectionCard {
                     title: "Calendar"
 
-                        ColumnLayout {
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        RowLayout {
                             Layout.fillWidth: true
-                            spacing: 8
 
-                            RowLayout {
-                                Layout.fillWidth: true
-
-                                Switch {
-                                    text: "Show archived"
-                                    checked: appController.calendarIncludeArchived
-                                    onToggled: appController.calendarIncludeArchived = checked
-                                }
-
-                                Switch {
-                                    text: "Show published"
-                                    checked: appController.calendarIncludePublished
-                                    onToggled: appController.calendarIncludePublished = checked
-                                }
-
-                                Item {
-                                    Layout.fillWidth: true
-                                }
+                            ToolButton {
+                                icon.name: "go-first"
+                                text: "Previous year"
+                                display: AbstractButton.IconOnly
+                                ToolTip.visible: hovered
+                                ToolTip.text: text
+                                onClicked: window.moveCalendarYear(-1)
                             }
 
-                            ScrollView {
+                            ToolButton {
+                                icon.name: "go-previous"
+                                text: "Previous month"
+                                display: AbstractButton.IconOnly
+                                ToolTip.visible: hovered
+                                ToolTip.text: text
+                                onClicked: window.moveCalendarMonth(-1)
+                            }
+
+                            Label {
                                 Layout.fillWidth: true
-                                Layout.preferredHeight: 716
-                                clip: true
+                                horizontalAlignment: Text.AlignHCenter
+                                text: Qt.formatDate(window.calendarMonth, "MMMM yyyy")
+                                font.bold: true
+                                font.pixelSize: 18
+                            }
 
-                                ColumnLayout {
-                                    width: parent.width
-                                    spacing: 12
+                            ToolButton {
+                                icon.name: "go-next"
+                                text: "Next month"
+                                display: AbstractButton.IconOnly
+                                ToolTip.visible: hovered
+                                ToolTip.text: text
+                                onClicked: window.moveCalendarMonth(1)
+                            }
 
-                                    Repeater {
-                                        model: window.calendarSections
+                            ToolButton {
+                                icon.name: "go-last"
+                                text: "Next year"
+                                display: AbstractButton.IconOnly
+                                ToolTip.visible: hovered
+                                ToolTip.text: text
+                                onClicked: window.moveCalendarYear(1)
+                            }
 
-                                        delegate: Frame {
-                                            required property var modelData
-                                            Layout.fillWidth: true
-                                            padding: 12
-                                            background: Rectangle {
-                                                radius: 8
-                                                color: "#ffffff"
-                                                border.width: modelData.isToday ? 2 : 1
-                                                border.color: modelData.isToday ? "#2f9e44" : "#d5d5d5"
+                            Switch {
+                                text: "Show archived"
+                                checked: appController.calendarIncludeArchived
+                                onToggled: appController.calendarIncludeArchived = checked
+                            }
+
+                            Switch {
+                                text: "Show published"
+                                checked: appController.calendarIncludePublished
+                                onToggled: appController.calendarIncludePublished = checked
+                            }
+                        }
+
+                        ScrollView {
+                            id: calendarGridScroll
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 760
+                            Layout.minimumHeight: 520
+                            clip: true
+                            contentWidth: calendarGrid.width
+                            contentHeight: calendarGrid.implicitHeight
+
+                            GridLayout {
+                                id: calendarGrid
+                                columns: 8
+                                rowSpacing: 1
+                                columnSpacing: 1
+                                width: Math.max(calendarGridScroll.width, 900)
+                                implicitWidth: 900
+
+                                Repeater {
+                                    model: 8
+
+                                    delegate: Rectangle {
+                                        required property int index
+                                        Layout.fillWidth: true
+                                        implicitHeight: 32
+                                        color: "#e9ecef"
+
+                                        Label {
+                                            anchors.centerIn: parent
+                                            text: index === 0
+                                                ? qsTr("Week")
+                                                : window.calendarWeekdayNames[(window.calendarFirstDay() + index - 2) % 7]
+                                            font.bold: true
+                                            color: "#495057"
+                                        }
+                                    }
+                                }
+
+                                Repeater {
+                                    model: window.calendarCells
+
+                                    delegate: Rectangle {
+                                        required property var modelData
+                                        Layout.fillWidth: true
+                                        Layout.alignment: Qt.AlignTop
+                                        implicitHeight: modelData.isWeekNumber ? 74 : Math.max(74, dayContents.implicitHeight + 10)
+                                        color: modelData.isWeekNumber
+                                            ? "#f1f3f5"
+                                            : (modelData.isToday ? "#eef8ee" : (modelData.isCurrentMonth ? "#ffffff" : "#f3f4f5"))
+                                        border.width: modelData.isToday && !modelData.isWeekNumber ? 2 : 1
+                                        border.color: modelData.isToday && !modelData.isWeekNumber ? "#2f9e44" : "#d5d5d5"
+
+                                        Label {
+                                            anchors.centerIn: parent
+                                            visible: modelData.isWeekNumber
+                                            text: modelData.weekNumber
+                                            font.bold: true
+                                            color: "#6c757d"
+                                        }
+
+                                        ColumnLayout {
+                                            id: dayContents
+                                            anchors.fill: parent
+                                            anchors.margins: 5
+                                            spacing: 3
+                                            visible: !modelData.isWeekNumber
+
+                                            Label {
+                                                text: modelData.weekNumber
+                                                visible: false
                                             }
 
-                                            ColumnLayout {
-                                                anchors.fill: parent
-                                                spacing: 8
+                                            RowLayout {
+                                                Layout.fillWidth: true
 
-                                                RowLayout {
-                                                    Layout.fillWidth: true
-
-                                                    Label {
-                                                        text: modelData.dateKey
-                                                        font.bold: true
-                                                        font.pixelSize: 18
-                                                        color: "#111111"
-                                                    }
-
-                                                    Rectangle {
-                                                        visible: modelData.hasContent
-                                                        radius: 10
-                                                        color: "#3f6fa8"
-                                                        implicitHeight: 24
-                                                        implicitWidth: createBadgeLabel.implicitWidth + 18
-
-                                                        Label {
-                                                            id: createBadgeLabel
-                                                            anchors.centerIn: parent
-                                                            text: "Create"
-                                                            color: "white"
-                                                            font.bold: true
-                                                        }
-                                                    }
-
-                                                    Rectangle {
-                                                        visible: modelData.hasPublication
-                                                        radius: 10
-                                                        color: "#3d7f4a"
-                                                        implicitHeight: 24
-                                                        implicitWidth: publishBadgeLabel.implicitWidth + 18
-
-                                                        Label {
-                                                            id: publishBadgeLabel
-                                                            anchors.centerIn: parent
-                                                            text: "Publish"
-                                                            color: "white"
-                                                            font.bold: true
-                                                        }
-                                                    }
-
-                                                    Item {
-                                                        Layout.fillWidth: true
-                                                    }
+                                                Label {
+                                                    text: modelData.isWeekNumber ? "" : String(modelData.dayNumber)
+                                                    font.bold: true
+                                                    color: modelData.isCurrentMonth ? "#212529" : "#adb5bd"
                                                 }
 
-                                                Repeater {
-                                                    model: modelData.items
+                                                Item { Layout.fillWidth: true }
+                                            }
 
-                                                    delegate: Rectangle {
-                                                        required property var modelData
-                                                        Layout.fillWidth: true
-                                                        radius: 6
-                                                        color: modelData.sourceType === "publication" ? "#e7f6e9" : "#e8f2ff"
-                                                        border.width: modelData.isOverdue ? 2 : 1
-                                                        border.color: modelData.isOverdue
-                                                            ? "#d94841"
-                                                            : (modelData.sourceType === "publication" ? "#b7d9bf" : "#bfd4ee")
-                                                        implicitHeight: calendarCardLayout.implicitHeight + 16
+                                            Repeater {
+                                                model: modelData.items
 
-                                                        ColumnLayout {
-                                                            id: calendarCardLayout
-                                                            anchors.fill: parent
-                                                            anchors.margins: 8
-                                                            spacing: 4
+                                                delegate: Rectangle {
+                                                    required property var modelData
+                                                    Layout.fillWidth: true
+                                                    implicitHeight: 22
+                                                    radius: 3
+                                                    color: modelData.sourceType === "publication" ? "#e7f6e9" : "#e8f2ff"
+                                                    border.width: modelData.isOverdue ? 2 : 1
+                                                    border.color: modelData.isOverdue
+                                                        ? "#d94841"
+                                                        : (modelData.sourceType === "publication" ? "#b7d9bf" : "#bfd4ee")
 
-                                                            Rectangle {
-                                                                radius: 10
-                                                                color: modelData.sourceType === "publication" ? "#3d7f4a" : "#3f6fa8"
-                                                                implicitHeight: 24
-                                                                implicitWidth: calendarTypeLabel.implicitWidth + 18
+                                                    RowLayout {
+                                                        anchors.fill: parent
+                                                        anchors.leftMargin: 4
+                                                        anchors.rightMargin: 4
+                                                        spacing: 4
 
-                                                                Label {
-                                                                    id: calendarTypeLabel
-                                                                    anchors.centerIn: parent
-                                                                    text: modelData.sourceType === "publication" ? "Publish" : "Create"
-                                                                    color: "white"
-                                                                    font.bold: true
-                                                                }
-                                                            }
+                                                        Label {
+                                                            text: modelData.sourceType === "publication" ? "↗" : "＋"
+                                                            color: modelData.sourceType === "publication" ? "#2f7d3d" : "#356da8"
+                                                            font.bold: true
+                                                        }
 
-                                                            Label {
-                                                                text: modelData.title
-                                                                font.bold: true
-                                                                color: "#111111"
-                                                                wrapMode: Text.Wrap
-                                                                Layout.fillWidth: true
-                                                            }
+                                                        Label {
+                                                            Layout.fillWidth: true
+                                                            text: modelData.title + (modelData.count > 1 ? " x " + modelData.count : "")
+                                                            elide: Text.ElideRight
+                                                            color: "#212529"
+                                                        }
+                                                    }
 
-                                                            Label {
-                                                                text: [modelData.series, modelData.channel].filter(function(value) { return value.length > 0 }).join(" | ")
-                                                                visible: text.length > 0
-                                                                color: "#555555"
-                                                                wrapMode: Text.Wrap
-                                                                Layout.fillWidth: true
-                                                            }
+                                                    MouseArea {
+                                                        anchors.fill: parent
+                                                        acceptedButtons: Qt.RightButton
+                                                        onClicked: calendarCardMenu.popup()
+                                                    }
+
+                                                    Menu {
+                                                        id: calendarCardMenu
+
+                                                        MenuItem {
+                                                            text: "Edit"
+                                                            onTriggered: quickAddDialog.openForEdit(modelData.contentId)
+                                                        }
+
+                                                        MenuSeparator { }
+
+                                                        MenuItem {
+                                                            text: "Move to"
+                                                            onTriggered: calendarMoveDialog.openFor(modelData)
                                                         }
                                                     }
                                                 }
@@ -2409,6 +2593,7 @@ ApplicationWindow {
                                 }
                             }
                         }
+                    }
                 }
             }
         }
@@ -2581,13 +2766,6 @@ ApplicationWindow {
                                     checked: appController.seriesShowArchived
                                     onToggled: appController.seriesShowArchived = checked
                                 }
-                            }
-
-                            TextField {
-                                Layout.fillWidth: true
-                                placeholderText: "Search series name or description"
-                                text: appController.seriesSearchQuery
-                                onTextEdited: appController.seriesSearchQuery = text
                             }
 
                             ListView {

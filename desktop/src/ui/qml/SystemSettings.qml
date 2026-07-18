@@ -21,6 +21,7 @@ ScrollView {
         appSettings.importedIdeaTitleWordCap = importedIdeaTitleWordCapBox.value
         appSettings.confirmContentDeletion = confirmDeleteSwitch.checked
         appSettings.fetchAddedUrlTitles = fetchUrlTitlesSwitch.checked
+        appSettings.calendarFirstDayOfWeek = calendarFirstDayBox.currentValue
         reload()
         return true
     }
@@ -39,6 +40,27 @@ ScrollView {
         importedIdeaTitleWordCapBox.value = appSettings.importedIdeaTitleWordCap
         confirmDeleteSwitch.checked = appSettings.confirmContentDeletion
         fetchUrlTitlesSwitch.checked = appSettings.fetchAddedUrlTitles
+        calendarFirstDayBox.currentIndex = root.calendarFirstDayIndex(appSettings.calendarFirstDayOfWeek)
+    }
+
+    readonly property var calendarFirstDayOptions: [
+        { label: qsTr("Locale default"), value: 0 },
+        { label: qsTr("Monday"), value: 1 },
+        { label: qsTr("Tuesday"), value: 2 },
+        { label: qsTr("Wednesday"), value: 3 },
+        { label: qsTr("Thursday"), value: 4 },
+        { label: qsTr("Friday"), value: 5 },
+        { label: qsTr("Saturday"), value: 6 },
+        { label: qsTr("Sunday"), value: 7 }
+    ]
+
+    function calendarFirstDayIndex(value) {
+        for (let index = 0; index < calendarFirstDayOptions.length; ++index) {
+            if (calendarFirstDayOptions[index].value === value) {
+                return index
+            }
+        }
+        return 0
     }
 
     GridLayout {
@@ -211,6 +233,28 @@ ScrollView {
         Switch {
             id: fetchUrlTitlesSwitch
             checked: appSettings.fetchAddedUrlTitles
+        }
+
+        Label {
+            text: qsTr("Calendar Week Starts")
+        }
+
+        ComboBox {
+            id: calendarFirstDayBox
+            Layout.fillWidth: true
+            textRole: "label"
+            valueRole: "value"
+            model: root.calendarFirstDayOptions
+            currentIndex: root.calendarFirstDayIndex(appSettings.calendarFirstDayOfWeek)
+        }
+
+        Item { }
+
+        Label {
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            text: qsTr("Locale default uses the first day configured for your system locale.")
+            color: palette.mid
         }
 
         Item {

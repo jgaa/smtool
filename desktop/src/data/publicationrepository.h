@@ -22,6 +22,10 @@ public:
                                  int *createdCount = nullptr,
                                  QString *errorMessage = nullptr) const;
     bool update(const Domain::Publication &publication, QString *errorMessage = nullptr) const;
+    bool updateScheduledAtForContentOnDate(const QString &contentId,
+                                           const QDate &fromDate,
+                                           const QDateTime &scheduledAt,
+                                           QString *errorMessage = nullptr) const;
     bool remove(const QString &id, QString *errorMessage = nullptr) const;
 
 private:
