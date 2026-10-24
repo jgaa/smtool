@@ -7,10 +7,25 @@
     tools:context=".FirstFragment">
 
     <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/recycler_ideas"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
+        android:id="@+id/recycler_targets"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
         app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        tools:listitem="@layout/item_target_button" />
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/recycler_ideas"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager"
+        app:layout_constraintTop_toBottomOf="@id/recycler_targets"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
         tools:listitem="@layout/item_idea" />
 
     <com.google.android.material.floatingactionbutton.FloatingActionButton

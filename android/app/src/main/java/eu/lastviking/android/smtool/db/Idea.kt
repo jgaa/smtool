@@ -10,5 +10,6 @@ data class Idea(
     val transcribedAt: Long? = null,
     val status: String, // "recording", "transcript"
     val exported: Boolean = false,
-    val transcript: String? = null
+    val transcript: String? = null,
+    val targetId: Long = 1
 )

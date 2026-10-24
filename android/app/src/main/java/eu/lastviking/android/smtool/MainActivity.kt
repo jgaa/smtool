@@ -7,6 +7,7 @@ import android.widget.ArrayAdapter
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.Spinner
+import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -22,6 +23,7 @@ import androidx.navigation.ui.navigateUp
 import androidx.navigation.ui.setupActionBarWithNavController
 import eu.lastviking.android.smtool.databinding.ActivityMainBinding
 import eu.lastviking.android.smtool.db.DatabaseHelper
+import eu.lastviking.android.smtool.db.Target
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -67,27 +69,46 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
-        // Inflate the menu; this adds items to the action bar if it is present.
         menuInflater.inflate(R.menu.menu_main, menu)
         
         val navHostFragment =
             supportFragmentManager.findFragmentById(R.id.nav_host_fragment_content_main) as NavHostFragment
         val firstFragment = navHostFragment.childFragmentManager.fragments.firstOrNull { it is FirstFragment } as? FirstFragment
-        val hasSelection = firstFragment?.getSelectedIds()?.isNotEmpty() ?: false
+        val selectedIds = firstFragment?.getSelectedIds() ?: emptyList()
+        val hasSelection = selectedIds.isNotEmpty()
         menu.findItem(R.id.action_share_selected)?.isVisible = hasSelection
         
         val prefs = getSharedPreferences("settings", MODE_PRIVATE)
-        val transferEnabled = prefs.getBoolean("transfer_enabled", true)
+        val dbHelper = DatabaseHelper(this)
+        val targets = dbHelper.getAllTargets()
+        val transferEnabled = targets.any { it.transferEnabled }
         menu.findItem(R.id.action_transfer)?.isVisible = transferEnabled
+
+        val moveItem = menu.findItem(R.id.action_move_to_target)
+        if (moveItem != null) {
+            if (targets.size > 1 && hasSelection) {
+                moveItem.isVisible = true
+                val subMenu = moveItem.subMenu
+                subMenu?.clear()
+                val currentTargetId = firstFragment?.getCurrentSelectedTargetId() ?: 1
+                val otherTargets = targets.filter { it.id != currentTargetId }
+                for ((index, target) in otherTargets.withIndex()) {
+                    subMenu?.add(Menu.NONE, 2000 + index, index, target.name)
+                }
+            } else {
+                moveItem.isVisible = false
+            }
+        }
         
         return true
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        // Handle action bar item clicks here. The action bar will
-        // automatically handle clicks on the Home/Up button, so long
-        // as you specify a parent activity in AndroidManifest.xml.
         return when (item.itemId) {
+            R.id.action_targets -> {
+                showTargetManagerDialog()
+                true
+            }
             R.id.action_transcribe_all -> {
                 val navHostFragment =
                     supportFragmentManager.findFragmentById(R.id.nav_host_fragment_content_main) as NavHostFragment
@@ -125,23 +146,196 @@ class MainActivity : AppCompatActivity() {
                 performTransfer(selectedIds)
                 true
             }
-            else -> super.onOptionsItemSelected(item)
+            else -> {
+                if (item.itemId >= 2000 && item.itemId < 3000) {
+                    val index = item.itemId - 2000
+                    val dbHelper = DatabaseHelper(this)
+                    val targets = dbHelper.getAllTargets()
+                    val navHostFragment =
+                        supportFragmentManager.findFragmentById(R.id.nav_host_fragment_content_main) as NavHostFragment
+                    val firstFragment = navHostFragment.childFragmentManager.fragments.firstOrNull { it is FirstFragment } as? FirstFragment
+                    val currentTargetId = firstFragment?.getCurrentSelectedTargetId() ?: 1
+                    val otherTargets = targets.filter { it.id != currentTargetId }
+                    val targetToMoveTo = otherTargets.getOrNull(index)
+                    val selectedIds = firstFragment?.getSelectedIds() ?: emptyList()
+
+                    if (targetToMoveTo != null && selectedIds.isNotEmpty()) {
+                        lifecycleScope.launch(Dispatchers.IO) {
+                            val db = dbHelper.writableDatabase
+                            for (id in selectedIds) {
+                                val values = android.content.ContentValues().apply {
+                                    put(DatabaseHelper.COLUMN_TARGET_ID, targetToMoveTo.id)
+                                }
+                                db.update(DatabaseHelper.TABLE_IDEAS, values, "${DatabaseHelper.COLUMN_ID} = ?", arrayOf(id.toString()))
+                            }
+                            withContext(Dispatchers.Main) {
+                                firstFragment?.clearSelection()
+                                firstFragment?.refreshIdeas()
+                                Toast.makeText(this@MainActivity, "Moved ideas to target '${targetToMoveTo.name}'", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+                    true
+                } else {
+                    super.onOptionsItemSelected(item)
+                }
+            }
         }
     }
 
-    private fun performTransfer(filterIds: List<Long>? = null) {
-        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
-        val serverAddress = prefs.getString("server_address", "") ?: ""
-        val serverPort = prefs.getInt("server_port", 45437)
+    private fun showTargetManagerDialog() {
+        val dialogView = layoutInflater.inflate(R.layout.dialog_target_manager, null)
+        val recycler = dialogView.findViewById<androidx.recyclerview.widget.RecyclerView>(R.id.recycler_targets)
+        val addButton = dialogView.findViewById<android.widget.Button>(R.id.button_add_target)
 
-        if (serverAddress.isBlank()) {
-            showSettingsDialog()
+        val dbHelper = DatabaseHelper(this)
+        val targets = dbHelper.getAllTargets()
+
+        val adapter = TargetAdapter(targets, { target ->
+            showEditTargetDialog(target) {
+                refreshTargetManagerList(recycler)
+                refreshFirstFragment()
+            }
+        }, { target ->
+            val prefs = getSharedPreferences("settings", MODE_PRIVATE)
+            val defaultTargetId = prefs.getLong("default_target_id", 1)
+            if (target.id == defaultTargetId) {
+                AlertDialog.Builder(this)
+                    .setTitle("Cannot Delete")
+                    .setMessage(R.string.cannot_delete_default_target)
+                    .setPositiveButton(android.R.string.ok, null)
+                    .show()
+                return@TargetAdapter
+            }
+            AlertDialog.Builder(this)
+                .setTitle("Delete Target")
+                .setMessage(R.string.delete_target_confirmation)
+                .setPositiveButton(android.R.string.ok) { _, _ ->
+                    lifecycleScope.launch(Dispatchers.IO) {
+                        dbHelper.deleteTarget(target.id, defaultTargetId)
+                        withContext(Dispatchers.Main) {
+                            refreshTargetManagerList(recycler)
+                            refreshFirstFragment()
+                        }
+                    }
+                }
+                .setNegativeButton(android.R.string.cancel, null)
+                .show()
+        })
+
+        recycler.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(this)
+        recycler.adapter = adapter
+
+        addButton.setOnClickListener {
+            showEditTargetDialog(null) {
+                refreshTargetManagerList(recycler)
+                refreshFirstFragment()
+            }
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle(R.string.target_manager_title)
+            .setView(dialogView)
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
+    }
+
+    private fun refreshTargetManagerList(recycler: androidx.recyclerview.widget.RecyclerView) {
+        val dbHelper = DatabaseHelper(this)
+        val targets = dbHelper.getAllTargets()
+        (recycler.adapter as? TargetAdapter)?.updateData(targets)
+    }
+
+    private fun showEditTargetDialog(target: Target?, onSaved: () -> Unit) {
+        val dialogView = layoutInflater.inflate(R.layout.dialog_edit_target, null)
+        val editName = dialogView.findViewById<EditText>(R.id.edit_target_name)
+        val editAddress = dialogView.findViewById<EditText>(R.id.edit_server_address)
+        val editPort = dialogView.findViewById<EditText>(R.id.edit_server_port)
+        val checkTransfer = dialogView.findViewById<CheckBox>(R.id.check_transfer_enabled)
+        val checkDelete = dialogView.findViewById<CheckBox>(R.id.check_delete_after_transfer)
+
+        target?.let {
+            editName.setText(it.name)
+            editAddress.setText(it.serverAddress)
+            editPort.setText(it.serverPort.toString())
+            checkTransfer.isChecked = it.transferEnabled
+            checkDelete.isChecked = it.deleteAfterTransfer
+        } ?: run {
+            checkTransfer.isChecked = true
+            checkDelete.isChecked = false
+            editPort.setText("45437")
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle(if (target == null) R.string.add_target else R.string.edit_target)
+            .setView(dialogView)
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                val name = editName.text.toString().trim()
+                if (name.isBlank() || name.length > 32) {
+                    Toast.makeText(this, "Target name must be between 1 and 32 characters", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                val address = editAddress.text.toString().trim()
+                val port = editPort.text.toString().toIntOrNull() ?: 45437
+                val transfer = checkTransfer.isChecked
+                val delete = checkDelete.isChecked
+
+                lifecycleScope.launch(Dispatchers.IO) {
+                    val dbHelper = DatabaseHelper(this@MainActivity)
+                    if (target == null) {
+                        dbHelper.insertTarget(Target(name = name, serverAddress = address, serverPort = port, transferEnabled = transfer, deleteAfterTransfer = delete))
+                    } else {
+                        dbHelper.updateTarget(target.copy(name = name, serverAddress = address, serverPort = port, transferEnabled = transfer, deleteAfterTransfer = delete))
+                    }
+                    withContext(Dispatchers.Main) {
+                        onSaved()
+                    }
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun performTransfer(filterIds: List<Long>? = null) {
+        val dbHelper = DatabaseHelper(this)
+        lifecycleScope.launch(Dispatchers.IO) {
+            val targets = dbHelper.getAllTargets()
+            if (targets.isEmpty()) return@launch
+
+            withContext(Dispatchers.Main) {
+                val targetNames = targets.map { it.name }.toTypedArray()
+                var selectedIndex = 0
+                AlertDialog.Builder(this@MainActivity)
+                    .setTitle(R.string.transfer_target_prompt)
+                    .setSingleChoiceItems(targetNames, selectedIndex) { _, which ->
+                        selectedIndex = which
+                    }
+                    .setPositiveButton(android.R.string.ok) { _, _ ->
+                        val chosenTarget = targets[selectedIndex]
+                        executeTransferForTarget(chosenTarget, filterIds)
+                    }
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show()
+            }
+        }
+    }
+
+    private fun executeTransferForTarget(target: Target, filterIds: List<Long>?) {
+        val serverAddress = target.serverAddress
+        val serverPort = target.serverPort
+
+        if (serverAddress.isBlank() || !target.transferEnabled) {
+            AlertDialog.Builder(this)
+                .setTitle("Cannot Transfer")
+                .setMessage("Target '${target.name}' does not have a valid server address or transfer is disabled.")
+                .setPositiveButton(android.R.string.ok, null)
+                .show()
             return
         }
 
         lifecycleScope.launch(Dispatchers.IO) {
             val dbHelper = DatabaseHelper(this@MainActivity)
-            val allIdeas = dbHelper.getAllIdeas()
+            val allIdeas = dbHelper.getIdeasForTarget(target.id)
             
             val ideasToTransfer = if (!filterIds.isNullOrEmpty()) {
                 val selected = allIdeas.filter { filterIds.contains(it.id) }
@@ -151,7 +345,7 @@ class MainActivity : AppCompatActivity() {
                     withContext(Dispatchers.Main) {
                         AlertDialog.Builder(this@MainActivity)
                             .setTitle("Cannot Transfer")
-                            .setMessage("Some selected ideas have not been transcribed yet. Only transcribed text can be transferred.")
+                            .setMessage("Some selected ideas for this target have not been transcribed yet. Only transcribed text can be transferred.")
                             .setPositiveButton(android.R.string.ok, null)
                             .show()
                     }
@@ -166,7 +360,7 @@ class MainActivity : AppCompatActivity() {
                 withContext(Dispatchers.Main) {
                     AlertDialog.Builder(this@MainActivity)
                         .setTitle("No Ideas")
-                        .setMessage("There are no transcribed ideas to transfer.")
+                        .setMessage("There are no transcribed ideas for target '${target.name}' to transfer.")
                         .setPositiveButton(android.R.string.ok, null)
                         .show()
                 }
@@ -191,7 +385,6 @@ class MainActivity : AppCompatActivity() {
                         val writer = PrintWriter(socket.getOutputStream(), true)
                         val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
 
-                        // 1. Hello
                         val hello = JSONObject().apply {
                             put("type", "hello")
                             put("app", "smtool-transfer")
@@ -200,14 +393,12 @@ class MainActivity : AppCompatActivity() {
                         }
                         writer.println(hello.toString())
 
-                        // 2. Wait for Continue
                         val continueLine = reader.readLine() ?: throw Exception("Server closed connection")
                         val continueJson = JSONObject(continueLine)
                         if (continueJson.getString("type") != "continue" || !continueJson.getBoolean("ok")) {
                             throw Exception(continueJson.optString("message", "Rejected by server"))
                         }
 
-                        // 3. Send Payload
                         val payload = JSONObject().apply {
                             put("type", "ideas")
                             put("version", 1)
@@ -219,7 +410,7 @@ class MainActivity : AppCompatActivity() {
                                     put("text", idea.transcript ?: "")
                                     put("created_at", SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date(idea.createdAt)))
                                     put("source", "android")
-                                    put("list", "inbox")
+                                    put("list", target.name)
                                 }
                                 itemsArray.put(item)
                             }
@@ -227,15 +418,11 @@ class MainActivity : AppCompatActivity() {
                         }
                         writer.println(payload.toString())
 
-                        // 4. Wait for Result
                         val resultLine = reader.readLine() ?: throw Exception("Server closed connection during result")
                         val resultJson = JSONObject(resultLine)
                         if (resultJson.getString("type") == "result" && resultJson.getBoolean("ok")) {
-                            // Success! 
-                            val deleteAfterTransfer = prefs.getBoolean("delete_after_transfer", false)
-                            
                             for (idea in ideasToTransfer) {
-                                if (deleteAfterTransfer) {
+                                if (target.deleteAfterTransfer) {
                                     dbHelper.deleteIdea(idea.id)
                                 } else {
                                     dbHelper.updateExportedStatus(idea.id, true)
@@ -245,14 +432,11 @@ class MainActivity : AppCompatActivity() {
                                 dialog.dismiss()
                                 AlertDialog.Builder(this@MainActivity)
                                     .setTitle(R.string.transfer_success)
-                                    .setMessage("Imported ${resultJson.optInt("imported", ideasToTransfer.size)} ideas.")
+                                    .setMessage("Imported ${resultJson.optInt("imported", ideasToTransfer.size)} ideas to target '${target.name}'.")
                                     .setPositiveButton(android.R.string.ok, null)
                                     .show()
                                 
-                                val navHostFragment =
-                                    supportFragmentManager.findFragmentById(R.id.nav_host_fragment_content_main) as NavHostFragment
-                                val firstFragment = navHostFragment.childFragmentManager.fragments.firstOrNull { it is FirstFragment } as? FirstFragment
-                                firstFragment?.refreshIdeas()
+                                refreshFirstFragment()
                             }
                         } else {
                             throw Exception(resultJson.optString("message", "Transfer failed"))
@@ -288,31 +472,26 @@ class MainActivity : AppCompatActivity() {
         val currentKeepAudio = prefs.getBoolean("keep_audio", false)
         val currentLanguage = prefs.getString("language", "en") ?: "en"
         val currentWords = prefs.getInt("title_word_limit", 6)
-        val currentPrompt = prefs.getString("whisper_prompt", "") ?: ""
-        val currentTransferEnabled = prefs.getBoolean("transfer_enabled", true)
-        val currentServerAddress = prefs.getString("server_address", "") ?: ""
-        val currentServerPort = prefs.getInt("server_port", 45437)
-        val currentDeleteAfterTransfer = prefs.getBoolean("delete_after_transfer", false)
+        var currentPrompt = prefs.getString("whisper_prompt", "") ?: ""
+        val defaultTargetId = prefs.getLong("default_target_id", 1)
         
         val dialogView = layoutInflater.inflate(R.layout.dialog_settings, null)
         val checkTranscribe = dialogView.findViewById<CheckBox>(R.id.check_transcribe_immediately)
         val checkKeepAudio = dialogView.findViewById<CheckBox>(R.id.check_keep_audio)
         val spinnerLanguage = dialogView.findViewById<Spinner>(R.id.spinner_language)
         val editWords = dialogView.findViewById<EditText>(R.id.edit_title_word_limit)
-        val editPrompt = dialogView.findViewById<EditText>(R.id.edit_whisper_prompt)
-        val checkTransferEnabled = dialogView.findViewById<CheckBox>(R.id.check_transfer_enabled)
-        val checkDeleteAfterTransfer = dialogView.findViewById<CheckBox>(R.id.check_delete_after_transfer)
-        val editServerAddress = dialogView.findViewById<EditText>(R.id.edit_server_address)
-        val editServerPort = dialogView.findViewById<EditText>(R.id.edit_server_port)
+        val buttonWhisperPrompt = dialogView.findViewById<android.widget.Button>(R.id.button_whisper_prompt)
+        val spinnerDefaultTarget = dialogView.findViewById<Spinner>(R.id.spinner_default_target)
         
         checkTranscribe.isChecked = currentTranscribe
         checkKeepAudio.isChecked = currentKeepAudio
         editWords.setText(currentWords.toString())
-        editPrompt.setText(currentPrompt)
-        checkTransferEnabled.isChecked = currentTransferEnabled
-        checkDeleteAfterTransfer.isChecked = currentDeleteAfterTransfer
-        editServerAddress.setText(currentServerAddress)
-        editServerPort.setText(currentServerPort.toString())
+
+        buttonWhisperPrompt.setOnClickListener {
+            showWhisperPromptDialog(currentPrompt) { newPrompt ->
+                currentPrompt = newPrompt
+            }
+        }
 
         val adapter = ArrayAdapter.createFromResource(
             this, R.array.languages, android.R.layout.simple_spinner_item
@@ -324,28 +503,49 @@ class MainActivity : AppCompatActivity() {
         val initialPosition = languageCodes.indexOf(currentLanguage).coerceAtLeast(0)
         spinnerLanguage.setSelection(initialPosition)
 
+        val dbHelper = DatabaseHelper(this)
+        val targets = dbHelper.getAllTargets()
+        val targetNames = targets.map { it.name }
+        val targetAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, targetNames)
+        targetAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        spinnerDefaultTarget.adapter = targetAdapter
+
+        val defaultTargetIndex = targets.indexOfFirst { it.id == defaultTargetId }.coerceAtLeast(0)
+        spinnerDefaultTarget.setSelection(defaultTargetIndex)
+
         AlertDialog.Builder(this)
             .setTitle(R.string.action_settings)
             .setView(dialogView)
             .setPositiveButton(android.R.string.ok) { _, _ ->
                 val words = editWords.text.toString().toIntOrNull() ?: 6
-                val prompt = editPrompt.text.toString()
                 val selectedLang = languageCodes[spinnerLanguage.selectedItemPosition]
-                val serverAddress = editServerAddress.text.toString()
-                val serverPort = editServerPort.text.toString().toIntOrNull() ?: 45437
+                val selectedTarget = targets.getOrNull(spinnerDefaultTarget.selectedItemPosition)
 
                 prefs.edit {
                     putBoolean("transcribe_immediately", checkTranscribe.isChecked)
                     putBoolean("keep_audio", checkKeepAudio.isChecked)
                     putString("language", selectedLang)
                     putInt("title_word_limit", words)
-                    putString("whisper_prompt", prompt)
-                    putBoolean("transfer_enabled", checkTransferEnabled.isChecked)
-                    putBoolean("delete_after_transfer", checkDeleteAfterTransfer.isChecked)
-                    putString("server_address", serverAddress)
-                    putInt("server_port", serverPort)
+                    putString("whisper_prompt", currentPrompt)
+                    selectedTarget?.let { putLong("default_target_id", it.id) }
                 }
                 invalidateOptionsMenu()
+                refreshFirstFragment()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun showWhisperPromptDialog(initialPrompt: String, onSaved: (String) -> Unit) {
+        val dialogView = layoutInflater.inflate(R.layout.dialog_whisper_prompt, null)
+        val editPrompt = dialogView.findViewById<EditText>(R.id.edit_whisper_prompt)
+        editPrompt.setText(initialPrompt)
+
+        AlertDialog.Builder(this)
+            .setTitle(R.string.pref_whisper_prompt)
+            .setView(dialogView)
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                onSaved(editPrompt.text.toString())
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
@@ -446,6 +646,13 @@ class MainActivity : AppCompatActivity() {
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
+    }
+
+    private fun refreshFirstFragment() {
+        val navHostFragment =
+            supportFragmentManager.findFragmentById(R.id.nav_host_fragment_content_main) as NavHostFragment
+        val firstFragment = navHostFragment.childFragmentManager.fragments.firstOrNull { it is FirstFragment } as? FirstFragment
+        firstFragment?.refreshIdeas()
     }
 
     override fun onSupportNavigateUp(): Boolean {

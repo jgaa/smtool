@@ -88,10 +88,13 @@ function(build_library target_name)
         target_link_options(${target_name} PRIVATE -Wl,--gc-sections)
         target_link_options(${target_name} PRIVATE -Wl,--exclude-libs,ALL)
         target_link_options(${target_name} PRIVATE -flto)
-
-        # 16KB Page Size Support, linker flags for 16KB page size alignment on Android 15+ devices
-        target_link_options(${target_name} PRIVATE -Wl,-z,max-page-size=16384)
     endif ()
+
+    # 16KB Page Size Support, linker flags for 16KB page size alignment on Android 15+ devices
+    target_link_options(${target_name} PRIVATE
+        "-Wl,-z,max-page-size=16384"
+        "-Wl,-z,common-page-size=16384"
+    )
 
     if (GGML_HOME)
         include(FetchContent)

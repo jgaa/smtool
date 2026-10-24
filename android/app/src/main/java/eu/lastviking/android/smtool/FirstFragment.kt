@@ -36,6 +36,8 @@ class FirstFragment : Fragment() {
     private lateinit var whisperManager: WhisperManager
     private lateinit var dbHelper: DatabaseHelper
     private lateinit var adapter: IdeaAdapter
+    private lateinit var targetButtonAdapter: TargetButtonAdapter
+    private var currentSelectedTargetId: Long = 1
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -63,6 +65,15 @@ class FirstFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
+        val prefs = requireContext().getSharedPreferences("settings", Context.MODE_PRIVATE)
+        currentSelectedTargetId = prefs.getLong("default_target_id", 1)
+
+        targetButtonAdapter = TargetButtonAdapter(emptyList(), currentSelectedTargetId) { target ->
+            currentSelectedTargetId = target.id
+            refreshTargetsAndIdeas()
+        }
+        binding.recyclerTargets.adapter = targetButtonAdapter
+
         adapter = IdeaAdapter(emptyList(), { idea ->
             val bundle = Bundle().apply { putLong("ideaId", idea.id) }
             findNavController().navigate(R.id.action_FirstFragment_to_EditIdeaFragment, bundle)
@@ -75,7 +86,7 @@ class FirstFragment : Fragment() {
             checkPermissionAndShowDialog()
         }
 
-        refreshIdeas()
+        refreshTargetsAndIdeas()
         checkModel()
     }
 
@@ -83,13 +94,34 @@ class FirstFragment : Fragment() {
         return if (::adapter.isInitialized) adapter.getSelectedIds() else emptyList()
     }
 
-    fun refreshIdeas() {
+    fun getCurrentSelectedTargetId(): Long {
+        return currentSelectedTargetId
+    }
+
+    fun clearSelection() {
+        if (::adapter.isInitialized) {
+            adapter.clearSelection()
+        }
+    }
+
+    fun refreshTargetsAndIdeas() {
         lifecycleScope.launch(Dispatchers.IO) {
-            val ideas = dbHelper.getAllIdeas()
+            val targets = dbHelper.getAllTargets()
+            val prefs = requireContext().getSharedPreferences("settings", Context.MODE_PRIVATE)
+            val defaultTargetId = prefs.getLong("default_target_id", 1)
+            if (targets.none { it.id == currentSelectedTargetId }) {
+                currentSelectedTargetId = defaultTargetId
+            }
+            val ideas = dbHelper.getIdeasForTarget(currentSelectedTargetId)
             withContext(Dispatchers.Main) {
+                targetButtonAdapter.updateData(targets, currentSelectedTargetId)
                 adapter.updateData(ideas)
             }
         }
+    }
+
+    fun refreshIdeas() {
+        refreshTargetsAndIdeas()
     }
 
     private fun checkModel() {
@@ -153,7 +185,6 @@ class FirstFragment : Fragment() {
         spoolDir.mkdirs()
         val audioFile = File(spoolDir, "recording_${System.currentTimeMillis()}.wav")
 
-        // Start recording immediately
         audioRecorder.startRecording(audioFile)
 
         val vuUpdateJob = lifecycleScope.launch {
@@ -163,8 +194,6 @@ class FirstFragment : Fragment() {
             )
             while (isActive) {
                 val amp = audioRecorder.getMaxAmplitude()
-                // Max amplitude for 16-bit PCM is 32767.
-                // We map this to 0-5 levels for our VU meter.
                 val level = (amp / 6554.0).toInt().coerceIn(0, 5)
                 
                 withContext(Dispatchers.Main) {
@@ -202,16 +231,15 @@ class FirstFragment : Fragment() {
 
             lifecycleScope.launch(Dispatchers.IO) {
                 val status = if (transcribeImmediately) "recording" else "pending"
-                val newIdea = Idea(name = name, createdAt = System.currentTimeMillis(), status = status)
+                val newIdea = Idea(name = name, createdAt = System.currentTimeMillis(), status = status, targetId = currentSelectedTargetId)
                 val id = dbHelper.insertIdea(newIdea)
                 
                 withContext(Dispatchers.Main) {
                     dialog.dismiss()
-                    refreshIdeas()
+                    refreshTargetsAndIdeas()
                     if (transcribeImmediately) {
                         transcribeIdea(id, audioFile)
                     } else {
-                        // Move file to permanent storage
                         val recordingsDir = File(requireContext().filesDir, "recordings")
                         recordingsDir.mkdirs()
                         val permanentFile = File(recordingsDir, "idea_${id}.wav")
@@ -261,7 +289,6 @@ class FirstFragment : Fragment() {
                     if (audioFile.exists()) {
                         val prefs = requireContext().getSharedPreferences("settings", Context.MODE_PRIVATE)
                         val lang = prefs.getString("language", "en") ?: "en"
-                        Log.d("FirstFragment", "Bulk transcription: idea ${idea.id}, lang: $lang")
                         val transcript = whisperManager.transcribe(audioFile, lang)
                         
                         if (transcript != null) {
@@ -283,7 +310,7 @@ class FirstFragment : Fragment() {
                         }
                         withContext(Dispatchers.Main) {
                             progressIndicator.progress = index + 1
-                            refreshIdeas()
+                            refreshTargetsAndIdeas()
                         }
                     }
                 }
@@ -295,16 +322,14 @@ class FirstFragment : Fragment() {
     fun deleteAllIdeas() {
         lifecycleScope.launch(Dispatchers.IO) {
             dbHelper.deleteAllIdeas()
-            // Delete all audio files
             val recordingsDir = File(requireContext().filesDir, "recordings")
             recordingsDir.listFiles()?.forEach { it.delete() }
             
-            // Delete any temporary recordings in spool
             val spoolDir = File(requireContext().cacheDir, "spool")
             spoolDir.listFiles()?.forEach { it.delete() }
             
             withContext(Dispatchers.Main) {
-                refreshIdeas()
+                refreshTargetsAndIdeas()
             }
         }
     }
@@ -313,7 +338,6 @@ class FirstFragment : Fragment() {
         lifecycleScope.launch {
             val prefs = requireContext().getSharedPreferences("settings", Context.MODE_PRIVATE)
             val lang = prefs.getString("language", "en") ?: "en"
-            Log.d("FirstFragment", "Immediate transcription: idea $ideaId, lang: $lang")
             val transcript = whisperManager.transcribe(audioFile, lang)
             
             withContext(Dispatchers.IO) {
@@ -335,7 +359,6 @@ class FirstFragment : Fragment() {
                         if (audioFile.exists()) audioFile.delete()
                     }
                 } else {
-                    // Transcription failed. Move to recordings and set to pending.
                     val recordingsDir = File(requireContext().filesDir, "recordings")
                     recordingsDir.mkdirs()
                     val permanentFile = File(recordingsDir, "idea_${ideaId}.wav")
@@ -343,7 +366,7 @@ class FirstFragment : Fragment() {
                     dbHelper.updateIdeaStatus(ideaId, "pending")
                 }
             }
-            refreshIdeas()
+            refreshTargetsAndIdeas()
         }
     }
 

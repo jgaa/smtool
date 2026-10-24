@@ -3,6 +3,19 @@
     xmlns:tools="http://schemas.android.com/tools"
     tools:context="eu.lastviking.android.smtool.MainActivity">
     <item
+        android:id="@+id/action_targets"
+        android:orderInCategory="85"
+        android:title="@string/action_targets"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/action_move_to_target"
+        android:orderInCategory="94"
+        android:title="@string/action_move_to_target"
+        android:visible="false"
+        app:showAsAction="never">
+        <menu />
+    </item>
+    <item
         android:id="@+id/action_transcribe_all"
         android:orderInCategory="90"
         android:title="@string/transcribe_all"

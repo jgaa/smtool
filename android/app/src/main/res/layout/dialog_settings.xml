@@ -40,22 +40,8 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:inputType="number"
+        android:autofillHints="number"
         android:text="6" />
-
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:text="@string/pref_whisper_prompt" />
-
-    <EditText
-        android:id="@+id/edit_whisper_prompt"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:hint="@string/pref_whisper_prompt_hint"
-        android:inputType="textMultiLine"
-        android:minLines="3"
-        android:gravity="top" />
 
     <View
         android:layout_width="match_parent"
@@ -63,43 +49,30 @@
         android:layout_marginTop="16dp"
         android:background="?android:attr/listDivider" />
 
-    <CheckBox
-        android:id="@+id/check_transfer_enabled"
+    <Button
+        android:id="@+id/button_whisper_prompt"
+        style="?attr/materialButtonOutlinedStyle"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:text="@string/pref_transfer_enabled" />
+        android:layout_marginTop="16dp"
+        android:text="@string/pref_whisper_prompt" />
 
-    <CheckBox
-        android:id="@+id/check_delete_after_transfer"
+    <View
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="@string/pref_delete_after_transfer" />
-
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:text="@string/pref_server_address" />
-
-    <EditText
-        android:id="@+id/edit_server_address"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:hint="192.168.1.100"
-        android:inputType="text" />
+        android:layout_height="1dp"
+        android:layout_marginTop="16dp"
+        android:background="?android:attr/listDivider" />
 
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:text="@string/pref_server_port" />
+        android:layout_marginTop="16dp"
+        android:text="@string/pref_default_target" />
 
-    <EditText
-        android:id="@+id/edit_server_port"
+    <Spinner
+        android:id="@+id/spinner_default_target"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:inputType="number"
-        android:text="45437" />
+        android:layout_marginTop="8dp" />
 
 </LinearLayout>
