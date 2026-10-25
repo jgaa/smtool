@@ -72,6 +72,14 @@ android {
     }
 }
 
+androidComponents {
+    onVariants(selector().all()) { variant ->
+        variant.outputs.forEach { output ->
+            output.outputFileName.set("smtool-1.0-${variant.name}.apk")
+        }
+    }
+}
+
 dependencies {
     // implementation(libs.whisper.android) // Removed in favor of embedded whisper.cpp
     implementation(libs.okhttp)
