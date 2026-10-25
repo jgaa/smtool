@@ -23,7 +23,8 @@
             android:layout_width="match_parent"
             android:layout_height="300dp"
             android:hint="@string/pref_whisper_prompt_hint"
-            android:inputType="textMultiLine"
+            android:inputType="textMultiLine|textNoSuggestions"
+            android:autofillHints="no"
             android:gravity="top"
             android:scrollbars="vertical" />
 

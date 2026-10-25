@@ -23,9 +23,23 @@ android {
     signingConfigs {
         create("release") {
             storeFile = file("${System.getProperty("user.home")}/lastviking.eu.keystore")
-            storePassword = project.findProperty("RELEASE_STORE_PASSWORD") as String? ?: System.getenv("RELEASE_STORE_PASSWORD") ?: ""
-            keyAlias = project.findProperty("RELEASE_KEY_ALIAS") as String? ?: System.getenv("RELEASE_KEY_ALIAS") ?: ""
-            keyPassword = project.findProperty("RELEASE_KEY_PASSWORD") as String? ?: System.getenv("RELEASE_KEY_PASSWORD") ?: ""
+            storePassword = project.findProperty("RELEASE_STORE_PASSWORD") as String?
+                ?: project.findProperty("storePassword") as String?
+                ?: project.findProperty("MYAPP_RELEASE_STORE_PASSWORD") as String?
+                ?: project.findProperty("signing.release.storePassword") as String?
+                ?: System.getenv("RELEASE_STORE_PASSWORD") ?: ""
+
+            keyAlias = project.findProperty("RELEASE_KEY_ALIAS") as String?
+                ?: project.findProperty("keyAlias") as String?
+                ?: project.findProperty("MYAPP_RELEASE_KEY_ALIAS") as String?
+                ?: project.findProperty("signing.release.keyAlias") as String?
+                ?: System.getenv("RELEASE_KEY_ALIAS") ?: ""
+
+            keyPassword = project.findProperty("RELEASE_KEY_PASSWORD") as String?
+                ?: project.findProperty("keyPassword") as String?
+                ?: project.findProperty("MYAPP_RELEASE_KEY_PASSWORD") as String?
+                ?: project.findProperty("signing.release.keyPassword") as String?
+                ?: System.getenv("RELEASE_KEY_PASSWORD") ?: ""
         }
     }
 
@@ -53,7 +67,7 @@ android {
 
     packaging {
         jniLibs {
-            useLegacyPackaging = false
+            useLegacyPackaging = true
         }
     }
 }
@@ -62,8 +76,6 @@ dependencies {
     // implementation(libs.whisper.android) // Removed in favor of embedded whisper.cpp
     implementation(libs.okhttp)
     implementation(libs.kotlinx.coroutines.android)
-    implementation(libs.mediapipe.tasks.audio)
-    implementation(libs.mediapipe.tasks.genai)
     implementation(libs.androidx.activity.ktx)
     implementation(libs.androidx.appcompat)
     implementation(libs.androidx.constraintlayout)
